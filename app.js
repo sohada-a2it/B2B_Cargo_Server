@@ -1,18 +1,25 @@
-// app.js - SIMPLE VERSION WITHOUT MONGODB OPTIONS
+// app.js - WITH GOOGLE AUTH SUPPORT
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const route = require('./src/routes/api');
 const quoteRoutes = require('./src/service/quoteTamplate');
 const contactRoutes = require('./src/service/contactTamplate');
+const authRoutes = require('./src/routes/authRoutes'); // NEW: Google auth routes
 const app = express();
 
-// Middleware
+// ===================== MIDDLEWARE =====================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
-app.use('/api/v1', quoteRoutes);
-app.use("/api/v1", contactRoutes);
+
+// CORS configuration for frontend
+app.use(cors({
+    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:8000'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 // Logging middleware
 app.use((req, res, next) => {
   console.log(`\n📨 ${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -21,18 +28,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// ===================== Mongoose Connect =====================
+// ===================== MONGOOSE CONNECT =====================
 let mongoose;
 try {
   mongoose = require('mongoose');
   console.log('Mongoose version:', mongoose.version);
 
-  const url = `mongodb+srv://a2itsohada_db_user:a2it-hrm@cluster0.18g6dhm.mongodb.net/B2B_Logistic?retryWrites=true&w=majority`;
+  const url = process.env.DATABASE_URL || `mongodb+srv://a2itsohada_db_user:a2it-hrm@cluster0.18g6dhm.mongodb.net/B2B_Logistic?retryWrites=true&w=majority`;
 
   mongoose.connect(url)
     .then(async () => {
       console.log("✅ B2B_Logistic DB Connected");
-
+      console.log(`📊 Database: ${mongoose.connection.name}`);
+      console.log(`🌍 Host: ${mongoose.connection.host}`);
     })
     .catch(err => {
       console.log("⚠️ MongoDB Connection Warning:", err.message);
@@ -43,12 +51,37 @@ try {
   console.log("⚠️ Mongoose not available, running in test mode");
 }
 
-// Routes
-app.use("/api/v1", route); 
-// 404 handler
-app.use("*", (req, res) => {
-  res.status(404).json({ message: "Route not found" });
+// ===================== ROUTES =====================
+app.use("/api/v1/auth", authRoutes);    // NEW: Google auth routes
+app.use('/api/v1', quoteRoutes);
+app.use("/api/v1", contactRoutes);
+app.use("/api/v1", route);
+
+// ===================== HEALTH CHECK =====================
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    server: 'running',
+    database: mongoose && mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
 });
-// server.js or app.js এ
-const cron = require('node-cron');
+
+// ===================== 404 HANDLER =====================
+app.use("*", (req, res) => {
+  res.status(404).json({ 
+    success: false,
+    message: `Route ${req.originalUrl} not found` 
+  });
+});
+
+// ===================== ERROR HANDLER =====================
+app.use((err, req, res, next) => {
+  console.error('❌ Error:', err.message);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error'
+  });
+});
+
 module.exports = app;

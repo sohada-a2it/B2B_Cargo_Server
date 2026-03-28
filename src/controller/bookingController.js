@@ -7,6 +7,7 @@ const User = require('../models/userModel');
 const { sendEmail } = require('../utils/emailService');
 const { generateTrackingNumber } = require('../utils/trackingGenerator');
 const mongoose = require('mongoose');
+const { generateInvoicePDFBuffer } = require('../service/pdfGenerator');
 // ========== HELPER FUNCTIONS ==========
 // ==================== মিসিং হেল্পার ফাংশনগুলো ====================
 // এই ফাংশনগুলো আপনার ফাইলের একদম উপরে, অন্যান্য হেল্পার ফাংশনের পরে যোগ করুন
@@ -655,7 +656,6 @@ exports.acceptQuote = async (req, res) => {
         try {
             const shipmentNumber = await generateShipmentNumber();
             
-            // Log booking data for debugging
             console.log('📋 Booking Data Summary:', {
                 bookingNumber: booking.bookingNumber,
                 shipmentClassification: booking.shipmentClassification,
@@ -670,7 +670,6 @@ exports.acceptQuote = async (req, res) => {
                 packageCount: booking.shipmentDetails?.packageDetails?.length || 0
             });
 
-            // Prepare packages from booking's packageDetails - সব তথ্য সংরক্ষণ
             const packages = (booking.shipmentDetails?.packageDetails || []).map(item => ({
                 description: item.description || '',
                 packagingType: item.packagingType || 'carton',
@@ -700,22 +699,18 @@ exports.acceptQuote = async (req, res) => {
 
             console.log(`   ✅ Prepared ${packages.length} packages with complete data`);
 
-            // Prepare complete shipment data - Booking-এর সব তথ্য ব্যবহার করে
             const shipmentData = {
-                // Required fields
                 shipmentNumber: shipmentNumber,
                 trackingNumber: trackingNumber,
                 bookingId: booking._id,
                 customerId: booking.customer._id,
                 createdBy: req.user._id,
                 
-                // Shipment Classification - সম্পূর্ণ Booking থেকে
                 shipmentClassification: {
                     mainType: booking.shipmentClassification?.mainType || 'air_freight',
                     subType: booking.shipmentClassification?.subType || 'air_freight'
                 },
                 
-                // Shipment Details - সম্পূর্ণ Booking থেকে
                 shipmentDetails: {
                     origin: booking.shipmentDetails?.origin || '',
                     destination: booking.shipmentDetails?.destination || '',
@@ -725,10 +720,8 @@ exports.acceptQuote = async (req, res) => {
                     totalVolume: booking.shipmentDetails?.totalVolume || 0
                 },
                 
-                // Packages - সম্পূর্ণ ডাটা সহ
                 packages: packages,
                 
-                // Sender Information - সম্পূর্ণ Booking থেকে
                 sender: {
                     name: booking.sender?.name || '',
                     companyName: booking.sender?.companyName || '',
@@ -744,7 +737,6 @@ exports.acceptQuote = async (req, res) => {
                     }
                 },
                 
-                // Receiver Information - সম্পূর্ণ Booking থেকে
                 receiver: {
                     name: booking.receiver?.name || '',
                     companyName: booking.receiver?.companyName || '',
@@ -761,28 +753,23 @@ exports.acceptQuote = async (req, res) => {
                     isResidential: booking.receiver?.isResidential || false
                 },
                 
-                // Courier Information - সম্পূর্ণ Booking থেকে
                 courier: {
                     company: booking.courier?.company || 'Cargo Logistics Group',
                     serviceType: booking.courier?.serviceType || booking.serviceType || 'standard'
                 },
                 
-                // Dates - সম্পূর্ণ Booking থেকে
                 dates: {
                     estimatedDeparture: booking.dates?.estimatedDeparture || null,
                     estimatedArrival: booking.dates?.estimatedArrival || null
                 },
                 
-                // Status
                 status: 'pending',
                 
-                // Transport Details - Booking থেকে নেওয়া (যদি থাকে)
                 transport: {
                     estimatedDeparture: booking.dates?.estimatedDeparture,
                     estimatedArrival: booking.dates?.estimatedArrival
                 },
                 
-                // Milestones
                 milestones: [{
                     status: 'pending',
                     location: booking.sender?.address?.country || 'Warehouse',
@@ -791,7 +778,6 @@ exports.acceptQuote = async (req, res) => {
                     timestamp: new Date()
                 }],
                 
-                // Reference fields
                 bookingNumber: booking.bookingNumber,
                 serviceType: booking.serviceType
             };
@@ -808,13 +794,11 @@ exports.acceptQuote = async (req, res) => {
                 totalWeight: shipment.shipmentDetails?.totalWeight
             });
             
-            // Update booking with shipment ID
             booking.shipmentId = shipment._id;
             await booking.save();
             
             console.log('   ✅ Booking updated with shipment ID');
 
-            // Notify warehouse staff (optional)
             try {
                 const warehouseStaff = await User.find({ 
                     role: 'warehouse', 
@@ -837,7 +821,6 @@ exports.acceptQuote = async (req, res) => {
                             shipmentType: booking.shipmentClassification?.mainType || 'N/A',
                             bookingNumber: booking.bookingNumber,
                             expectedDate: new Date(booking.dates?.estimatedArrival || Date.now()).toLocaleDateString(),
-                            // shipmentUrl: `${process.env.FRONTEND_URL}/warehouse/shipments/${shipment._id}`
                         }
                     }).catch(err => console.log('   ⚠️ Warehouse email error:', err.message));
                 }
@@ -861,10 +844,12 @@ exports.acceptQuote = async (req, res) => {
             }
         }
 
-        // ===== STEP 2: CREATE INVOICE (আগের মতই) =====
-        console.log('7. Creating invoice...');
+        // ===== STEP 2: CREATE INVOICE AND GENERATE PDF =====
+        console.log('7. Creating invoice and generating PDF...');
 
         let invoice = null;
+        let pdfBuffer = null;
+        
         try {
             const breakdown = booking.quotedPrice?.breakdown || {};
             
@@ -941,16 +926,42 @@ exports.acceptQuote = async (req, res) => {
                 amount: invoice.totalAmount
             });
 
+            // ===== GENERATE PDF =====
+            console.log('   📄 Generating PDF invoice...');
+            try {
+                const { generateInvoicePDFBuffer } = require('../services/pdfGenerator');
+                
+                const companyInfo = {
+                    name: 'Cargo Logistics Group',
+                    address: '123 Business Avenue, Commercial Area',
+                    city: 'Dhaka, Bangladesh 1212',
+                    phone: '+880 1234-567890',
+                    email: 'info@cargologistics.com',
+                    website: 'www.cargologistics.com'
+                };
+                
+                pdfBuffer = await generateInvoicePDFBuffer(invoice, companyInfo);
+                console.log('   ✅ PDF generated successfully, size:', pdfBuffer.length, 'bytes');
+                
+                invoice.pdfGeneratedAt = new Date();
+                invoice.pdfSize = pdfBuffer.length;
+                await invoice.save();
+                
+            } catch (pdfError) {
+                console.error('   ❌ PDF generation failed:', pdfError.message);
+                console.error('   Error stack:', pdfError.stack);
+            }
+
         } catch (invoiceError) {
             console.error('❌ Invoice creation error:', invoiceError.message);
         }
 
-        // ===== STEP 3: Send Emails (আগের মতই) =====
-        console.log('8. Sending confirmation emails...');
+        // ===== STEP 3: Send Emails with PDF Attachment =====
+        console.log('8. Sending confirmation emails with PDF...');
 
-        // Customer Email
+        // Customer Email with PDF Attachment
         if (booking.sender?.email) {
-            await sendEmail({
+            const emailData = {
                 to: booking.sender.email,
                 subject: '🎉 Booking Confirmed! - Cargo Logistics',
                 template: 'booking-confirmed-customer',
@@ -960,17 +971,26 @@ exports.acceptQuote = async (req, res) => {
                     trackingNumber: trackingNumber,
                     quotedAmount: booking.quotedPrice?.amount || 0,
                     currency: booking.quotedPrice?.currency || 'USD',
-                    // trackingUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/tracking/${trackingNumber}`,
-                    // invoiceUrl: `${process.env.FRONTEND_URL}/customer/invoices/${invoice?._id || ''}`,
                     invoiceNumber: invoice?.invoiceNumber || 'N/A',
-                    // dashboardUrl: `${process.env.FRONTEND_URL}/customer/dashboard`,
                     origin: booking.shipmentDetails?.origin || 'N/A',
                     destination: booking.shipmentDetails?.destination || 'N/A',
                     estimatedDelivery: booking.dates?.estimatedArrival ? 
                         new Date(booking.dates.estimatedArrival).toLocaleDateString() : 
                         new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()
                 }
-            }).catch(err => console.log('Customer email error:', err.message));
+            };
+            
+            if (pdfBuffer && invoice) {
+                emailData.attachments = [{
+                    filename: `invoice-${invoice.invoiceNumber}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf'
+                }];
+                console.log('   📎 PDF attachment added to customer email');
+            }
+            
+            await sendEmail(emailData).catch(err => console.log('Customer email error:', err.message));
+            console.log('✅ Customer email sent to:', booking.sender.email);
         }
 
         // Receiver Email
@@ -1002,9 +1022,7 @@ exports.acceptQuote = async (req, res) => {
                                 year: 'numeric',
                                 month: 'long',
                                 day: 'numeric'
-                            }),
-                        // trackingUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/tracking/${trackingNumber}`,
-                        // supportEmail: process.env.SUPPORT_EMAIL || 'support@cargologistics.com'
+                            })
                     }
                 });
                 console.log('✅ Receiver email sent successfully to:', booking.receiver.email);
@@ -1013,7 +1031,7 @@ exports.acceptQuote = async (req, res) => {
             }
         }
 
-        // Admin Emails
+        // Admin Emails with PDF Attachment
         const admins = await User.find({ role: 'admin', isActive: true });
         let allRecipients = admins.map(a => a.email);
         
@@ -1024,7 +1042,7 @@ exports.acceptQuote = async (req, res) => {
         allRecipients = [...new Set(allRecipients)];
 
         if (allRecipients.length > 0) {
-            await sendEmail({
+            const adminEmailData = {
                 to: allRecipients,
                 subject: '✅ Booking Confirmed - Action Required',
                 template: 'booking-confirmed-admin',
@@ -1034,20 +1052,30 @@ exports.acceptQuote = async (req, res) => {
                     trackingNumber: trackingNumber,
                     origin: booking.shipmentDetails?.origin || 'N/A',
                     destination: booking.shipmentDetails?.destination || 'N/A',
-                    // shipmentUrl: `${process.env.FRONTEND_URL}/admin/shipments/${shipment?._id || ''}`,
-                    // invoiceUrl: `${process.env.FRONTEND_URL}/admin/invoices/${invoice?._id || ''}`,
-                    invoiceNumber: invoice?.invoiceNumber || 'N/A'
+                    invoiceNumber: invoice?.invoiceNumber || 'N/A',
+                    totalAmount: invoice?.totalAmount || 0,
+                    currency: invoice?.currency || 'USD'
                 }
-            }).catch(err => console.log('Admin email error:', err.message));
+            };
             
-            console.log('✅ Booking confirmation email sent to:', allRecipients);
+            if (pdfBuffer && invoice) {
+                adminEmailData.attachments = [{
+                    filename: `invoice-${invoice.invoiceNumber}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf'
+                }];
+                console.log('   📎 PDF attachment added to admin email');
+            }
+            
+            await sendEmail(adminEmailData).catch(err => console.log('Admin email error:', err.message));
+            console.log('✅ Admin email sent to:', allRecipients);
         }
 
         console.log('9. ✅ Accept quote completed successfully');
         
         res.status(200).json({
             success: true,
-            message: 'Booking confirmed successfully. Shipment and invoice created.',
+            message: 'Booking confirmed successfully. Shipment and invoice created. PDF invoice sent via email.',
             data: {
                 booking: {
                     _id: booking._id,
@@ -1067,7 +1095,8 @@ exports.acceptQuote = async (req, res) => {
                     _id: invoice._id,
                     invoiceNumber: invoice.invoiceNumber,
                     totalAmount: invoice.totalAmount,
-                    currency: invoice.currency
+                    currency: invoice.currency,
+                    pdfGenerated: !!pdfBuffer
                 } : null
             }
         });
@@ -1747,10 +1776,11 @@ exports.getInvoiceById = async (req, res) => {
 
 // ========== 3. GET INVOICES BY CUSTOMER ==========
 // ========== 3. GET INVOICES BY CUSTOMER ==========
+// controllers/invoiceController.js
 exports.getInvoicesByCustomer = async (req, res) => {
   try {
     const { customerId } = req.params;
-    const { page = 1, limit = 20, status } = req.query;
+    const { status } = req.query;
     
     let query = {};
     
@@ -1758,15 +1788,12 @@ exports.getInvoicesByCustomer = async (req, res) => {
     const isValidObjectId = mongoose.Types.ObjectId.isValid(customerId);
     
     if (isValidObjectId) {
-      // If it's a valid ObjectId, search by customerId
       query.customerId = customerId;
     } else {
-      // If it's not a valid ObjectId, search by other fields
       query.$or = [
         { customerCode: customerId },
         { customerNumber: customerId },
         { 'customerInfo.customerId': customerId },
-        // Also try to find in customerId as string
         { customerId: customerId }
       ];
     }
@@ -1775,28 +1802,29 @@ exports.getInvoicesByCustomer = async (req, res) => {
       query.status = status;
     }
     
-    console.log('Invoice search query:', JSON.stringify(query, null, 2));
+    console.log('📊 Fetching ALL invoices for customer:', customerId);
     
+    // No limit - get all invoices
     const invoices = await Invoice.find(query)
       .populate('customerId', 'name email companyName')
       .populate('bookingId')
       .populate('shipmentId')
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
       .sort({ createdAt: -1 });
     
-    const total = await Invoice.countDocuments(query);
+    const total = invoices.length;
     
-    console.log(`Found ${invoices.length} invoices for customer ${customerId}`);
+    console.log(`✅ Found ${total} invoices for customer ${customerId}`);
     
     res.status(200).json({
       success: true,
       data: invoices,
+      summary: {
+        totalInvoices: total,
+        totalAmount: invoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0)
+      },
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / parseInt(limit))
+        hasMore: false
       }
     });
     

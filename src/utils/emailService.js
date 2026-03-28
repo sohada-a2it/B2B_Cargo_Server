@@ -95,11 +95,7 @@ const templates = {
                             <p><strong>Total Weight:</strong> ${data.totalWeight} kg</p>
                             <p><strong>Total Volume:</strong> ${data.totalVolume || 0} m³</p>
                             <p><strong>Requested Date:</strong> ${formatDate(data.requestedDate)}</p>
-                        </div>
-                        
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${data.bookingUrl}" class="button">🔍 View Booking Details</a>
-                        </div>
+                        </div> 
                         
                         <p><strong>Next Steps:</strong> Please review the booking details and provide a price quote within 24 hours.</p>
                     </div>

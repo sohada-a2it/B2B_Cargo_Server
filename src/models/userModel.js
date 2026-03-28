@@ -19,9 +19,12 @@ const userSchema = new mongoose.Schema({
         lowercase: true,
         trim: true
     },
-    password: {
+      password: {
         type: String,
-        required: [true, "Password is required"],
+        required: function() {
+            // শুধু local provider-এর জন্য password required
+            return this.provider === 'local';
+        },
         minlength: 6
     },
     phone: {
@@ -32,6 +35,32 @@ const userSchema = new mongoose.Schema({
     photo: {
         type: String,
         default: ""
+    },
+        // ==================== GOOGLE/FACEBOOK LOGIN FIELDS ====================
+    provider: {
+        type: String,
+        enum: ['local', 'google', 'facebook'],
+        default: 'local'
+    },
+    googleId: {
+        type: String,
+        sparse: true,
+        unique: true,
+        default: null
+    },
+    facebookId: {
+        type: String,
+        sparse: true,
+        unique: true,
+        default: null
+    },
+    avatar: {
+        type: String,
+        default: ""
+    },
+    emailVerified: {
+        type: Boolean,
+        default: false
     },
     
     // ==================== ROLE & PERMISSIONS ====================
