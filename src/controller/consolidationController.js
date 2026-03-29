@@ -6,7 +6,143 @@ const User = require('../models/userModel');
 const { sendEmail } = require('../utils/emailService');
 
 // ========== HELPER FUNCTIONS ==========
+// controllers/consolidationController.js - হেল্পার ফাংশন
 
+/**
+ * Get on hold shipments in a consolidation
+ */
+exports.getOnHoldShipments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const consolidation = await Consolidation.findById(id).populate({
+      path: 'shipments',
+      match: { status: 'on_hold' },
+      select: 'trackingNumber status holdReason heldAt shipmentDetails'
+    });
+    
+    if (!consolidation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consolidation not found'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        consolidationNumber: consolidation.consolidationNumber,
+        onHoldShipments: consolidation.shipments.filter(s => s.status === 'on_hold'),
+        count: consolidation.shipments.filter(s => s.status === 'on_hold').length
+      }
+    });
+    
+  } catch (error) {
+    console.error('Get on hold shipments error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Resume all on hold shipments in consolidation
+ */
+exports.resumeAllOnHoldShipments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    
+    const consolidation = await Consolidation.findById(id).populate('shipments');
+    
+    if (!consolidation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consolidation not found'
+      });
+    }
+    
+    const onHoldShipments = consolidation.shipments.filter(s => s.status === 'on_hold');
+    
+    if (onHoldShipments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No shipments on hold in this consolidation'
+      });
+    }
+    
+    // Resume each shipment
+    for (const shipment of onHoldShipments) {
+      shipment.status = 'in_progress';
+      shipment.resumedAt = new Date();
+      shipment.previousStatus = 'on_hold';
+      shipment.holdReason = null;
+      shipment.heldAt = null;
+      shipment.milestones.push({
+        status: 'in_progress',
+        location: consolidation.originWarehouse,
+        description: `Resumed from hold: ${notes || 'Resumed by admin'}`,
+        timestamp: new Date(),
+        updatedBy: req.user._id
+      });
+      await shipment.save();
+    }
+    
+    // Update consolidation status
+    consolidation.status = 'in_progress';
+    consolidation.timeline.push({
+      status: 'in_progress',
+      timestamp: new Date(),
+      description: `Resumed ${onHoldShipments.length} shipment(s) from hold. ${notes || ''}`,
+      updatedBy: req.user._id
+    });
+    
+    await consolidation.save();
+    
+    res.status(200).json({
+      success: true,
+      message: `${onHoldShipments.length} shipment(s) resumed successfully`,
+      data: {
+        consolidationNumber: consolidation.consolidationNumber,
+        resumedCount: onHoldShipments.length,
+        status: consolidation.status
+      }
+    });
+    
+  } catch (error) {
+    console.error('Resume all shipments error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get cancelled shipments from consolidation
+ */
+exports.getCancelledShipments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const consolidation = await Consolidation.findById(id);
+    
+    if (!consolidation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consolidation not found'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        consolidationNumber: consolidation.consolidationNumber,
+        cancelledShipments: consolidation.cancelledShipments || [],
+        count: (consolidation.cancelledShipments || []).length
+      }
+    });
+    
+  } catch (error) {
+    console.error('Get cancelled shipments error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 function getMainTypeName(type) {
     const names = {
         'sea_freight': 'Sea Freight',
@@ -767,86 +903,229 @@ exports.updateConsolidation = async (req, res) => {
 };
 
 // ========== 9. UPDATE CONSOLIDATION STATUS ==========
+// controllers/consolidationController.js - updateConsolidationStatus ফাংশন সম্পূর্ণ আপডেট করুন
+
 exports.updateConsolidationStatus = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status, actualDeparture, actualArrival, location, notes } = req.body;
+  try {
+    const { id } = req.params;
+    const { status, actualDeparture, actualArrival, location, notes } = req.body;
 
-        const consolidation = await Consolidation.findById(id).populate('shipments');
-        if (!consolidation) {
-            return res.status(404).json({
-                success: false,
-                message: 'Consolidation not found'
-            });
-        }
+    console.log('🔄 Updating consolidation status:', { id, status, location, notes });
 
-        const oldStatus = consolidation.status;
-        
-        // Update status and related fields
-        consolidation.status = status;
-        consolidation.updatedBy = req.user._id;
-        
-        if (status === 'completed' || status === 'loaded') {
-            consolidation.consolidationCompleted = new Date();
-        }
-        
-        if (status === 'loaded' || status === 'departed') {
-            consolidation.actualDeparture = actualDeparture || new Date();
-        }
-        
-        if (status === 'arrived') {
-            consolidation.actualArrival = actualArrival || new Date();
-        }
-
-        await consolidation.save();
-
-        // Update all shipments in this consolidation
-        const shipmentUpdate = {
-            $push: {
-                milestones: {
-                    status: status === 'loaded' ? 'loaded_in_container' :
-                           status === 'departed' ? 'in_transit' :
-                           status === 'arrived' ? 'arrived_at_destination_port' : status,
-                    location: location || consolidation.originWarehouse,
-                    description: notes || `Consolidation ${status} - Container ${consolidation.containerNumber}`,
-                    timestamp: new Date(),
-                    updatedBy: req.user._id
-                }
-            }
-        };
-
-        if (status === 'loaded' || status === 'departed') {
-            shipmentUpdate.$set = {
-                'transport.actualDeparture': actualDeparture || new Date(),
-                'transport.containerNumber': consolidation.containerNumber
-            };
-        }
-
-        if (status === 'arrived') {
-            shipmentUpdate.$set = {
-                'transport.actualArrival': actualArrival || new Date(),
-                status: 'arrived_at_destination_port'
-            };
-        }
-
-        await Shipment.updateMany(
-            { _id: { $in: consolidation.shipments } },
-            shipmentUpdate
-        );
-
-        // Log the status change
-        console.log(`✅ Consolidation ${consolidation.consolidationNumber} status updated: ${oldStatus} → ${status}`);
-
-        res.status(200).json({
-            success: true,
-            message: `Consolidation status updated to ${status}`,
-            data: consolidation
-        });
-
-    } catch (error) {
-        console.error('Update consolidation status error:', error);
-        res.status(500).json({ success: false, message: error.message });
+    const consolidation = await Consolidation.findById(id).populate('shipments');
+    
+    if (!consolidation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consolidation not found'
+      });
     }
+
+    const oldStatus = consolidation.status;
+    
+    // ========== UPDATE SHIPMENTS BASED ON CONSOLIDATION STATUS ==========
+    const activeShipments = consolidation.shipments.filter(s => 
+      s.status !== 'cancelled' && s.status !== 'delivered' && s.status !== 'completed'
+    );
+
+    // Map consolidation status to shipment status
+    const getShipmentStatus = (consolStatus) => {
+      const statusMap = {
+        'in_progress': 'pending',
+        'consolidated': 'pending',
+        'ready_for_dispatch': 'pending',
+        'loaded': 'pending',
+        'dispatched': 'in_transit',
+        'in_transit': 'in_transit',
+        'arrived': 'arrived_at_destination_port',
+        'customs_cleared': 'customs_cleared',
+        'out_for_delivery': 'out_for_delivery',
+        'delivered': 'delivered',
+        'completed': 'completed',
+        'cancelled': 'cancelled',
+        'on_hold': 'on_hold'
+      };
+      return statusMap[consolStatus] || 'pending';
+    };
+
+    const shipmentNewStatus = getShipmentStatus(status);
+
+    // Update all active shipments
+    for (const shipment of activeShipments) {
+      console.log(`  📦 Updating shipment ${shipment.trackingNumber}: ${shipment.status} → ${shipmentNewStatus}`);
+      
+      // Update shipment status
+      shipment.status = shipmentNewStatus;
+      shipment.currentMilestone = shipmentNewStatus;
+      
+      // Add milestone
+      if (!shipment.milestones) shipment.milestones = [];
+      shipment.milestones.push({
+        status: shipmentNewStatus,
+        location: location || consolidation.destinationPort || 'In Transit',
+        description: `Consolidation ${consolidation.consolidationNumber} status: ${status}. ${notes || ''}`,
+        timestamp: new Date(),
+        updatedBy: req.user._id
+      });
+      
+      // Update transport info based on status
+      if (!shipment.transport) shipment.transport = {};
+      
+      switch(status) {
+        case 'dispatched':
+        case 'in_transit':
+          shipment.transport.actualDeparture = actualDeparture || new Date();
+          shipment.transport.currentLocation = {
+            location: location || 'In Transit',
+            status: 'in_transit',
+            timestamp: new Date()
+          };
+          break;
+          
+        case 'arrived':
+          shipment.transport.actualArrival = actualArrival || new Date();
+          shipment.transport.currentLocation = {
+            location: location || consolidation.destinationPort,
+            status: 'arrived',
+            timestamp: new Date()
+          };
+          break;
+          
+        case 'customs_cleared':
+          shipment.transport.currentLocation = {
+            location: location || consolidation.destinationPort,
+            status: 'customs_cleared',
+            timestamp: new Date()
+          };
+          break;
+          
+        case 'out_for_delivery':
+          shipment.transport.currentLocation = {
+            location: location || 'Out for Delivery',
+            status: 'out_for_delivery',
+            timestamp: new Date()
+          };
+          break;
+          
+        case 'delivered':
+        case 'completed':
+          shipment.dates = shipment.dates || {};
+          shipment.dates.delivered = new Date();
+          shipment.transport.currentLocation = {
+            location: location || 'Delivered',
+            status: 'delivered',
+            timestamp: new Date()
+          };
+          break;
+      }
+      
+      await shipment.save();
+      console.log(`  ✅ Shipment ${shipment.trackingNumber} updated to ${shipmentNewStatus}`);
+    }
+
+    // Handle on_hold status
+    if (status === 'on_hold') {
+      for (const shipment of activeShipments) {
+        shipment.status = 'on_hold';
+        shipment.holdReason = notes || 'Consolidation on hold';
+        shipment.heldAt = new Date();
+        shipment.holdSource = 'consolidation';
+        shipment.milestones.push({
+          status: 'on_hold',
+          location: location || consolidation.originWarehouse,
+          description: `Consolidation on hold: ${notes || 'No reason provided'}`,
+          timestamp: new Date(),
+          updatedBy: req.user._id
+        });
+        await shipment.save();
+      }
+    }
+
+    // Handle resume from hold
+    if (status === 'in_progress' && oldStatus === 'on_hold') {
+      const heldShipments = consolidation.shipments.filter(s => s.status === 'on_hold');
+      for (const shipment of heldShipments) {
+        shipment.status = 'pending';
+        shipment.resumedAt = new Date();
+        shipment.previousStatus = 'on_hold';
+        shipment.holdReason = null;
+        shipment.heldAt = null;
+        shipment.milestones.push({
+          status: 'pending',
+          location: location || consolidation.originWarehouse,
+          description: `Consolidation resumed: ${notes || ''}`,
+          timestamp: new Date(),
+          updatedBy: req.user._id
+        });
+        await shipment.save();
+      }
+    }
+
+    // Handle cancellation
+    if (status === 'cancelled') {
+      for (const shipment of activeShipments) {
+        shipment.status = 'cancelled';
+        shipment.cancellationReason = notes || 'Consolidation cancelled';
+        shipment.cancelledAt = new Date();
+        shipment.cancelledBy = req.user._id;
+        shipment.milestones.push({
+          status: 'cancelled',
+          location: location || consolidation.originWarehouse,
+          description: `Consolidation cancelled: ${notes || 'No reason provided'}`,
+          timestamp: new Date(),
+          updatedBy: req.user._id
+        });
+        await shipment.save();
+      }
+    }
+
+    // Update consolidation status
+    consolidation.status = status;
+    consolidation.updatedBy = req.user._id;
+    
+    if (status === 'completed' || status === 'loaded') {
+      consolidation.consolidationCompleted = new Date();
+    }
+    
+    if (status === 'loaded' || status === 'dispatched') {
+      consolidation.actualDeparture = actualDeparture || new Date();
+    }
+    
+    if (status === 'arrived') {
+      consolidation.actualArrival = actualArrival || new Date();
+    }
+
+    // Add timeline entry
+    if (!consolidation.timeline) consolidation.timeline = [];
+    consolidation.timeline.push({
+      status: status,
+      timestamp: new Date(),
+      description: notes || `Consolidation status changed from ${oldStatus} to ${status}`,
+      updatedBy: req.user._id
+    });
+
+    await consolidation.save();
+
+    console.log(`✅ Consolidation ${consolidation.consolidationNumber} status updated: ${oldStatus} → ${status}`);
+    console.log(`📦 ${activeShipments.length} shipments updated to ${shipmentNewStatus}`);
+
+    res.status(200).json({
+      success: true,
+      message: `Consolidation ${status === 'on_hold' ? 'put on hold' : 
+                                   status === 'cancelled' ? 'cancelled' : 
+                                   status === 'in_progress' && oldStatus === 'on_hold' ? 'resumed' : 
+                                   `status updated to ${status}`}`,
+      data: {
+        consolidation,
+        shipmentsUpdated: activeShipments.length,
+        newShipmentStatus: shipmentNewStatus
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update consolidation status error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 // ========== 10. ADD SHIPMENTS TO EXISTING CONSOLIDATION ==========
@@ -1649,6 +1928,204 @@ exports.uploadDocument = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Upload error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+// controllers/consolidationController.js - নতুন ফাংশন
+
+/**
+ * Update individual shipment status inside consolidation (On Hold / Cancel / Resume)
+ */
+// controllers/consolidationController.js
+
+exports.updateShipmentInConsolidation = async (req, res) => {
+  try {
+    const { consolidationId, shipmentId } = req.params;
+    const { 
+      status, 
+      holdReason, 
+      cancellationReason,
+      notes,
+      resumeFromHold
+    } = req.body;
+
+    console.log('📦 Updating shipment in consolidation:', { consolidationId, shipmentId, status });
+
+    const consolidation = await Consolidation.findById(consolidationId)
+      .populate('shipments');
+    
+    if (!consolidation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Consolidation not found'
+      });
+    }
+
+    const shipmentExists = consolidation.shipments.some(
+      s => s._id.toString() === shipmentId
+    );
+    
+    if (!shipmentExists) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found in this consolidation'
+      });
+    }
+
+    const shipment = await Shipment.findById(shipmentId);
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found'
+      });
+    }
+
+    const previousStatus = shipment.status;
+    let milestoneDescription = notes || '';
+    let updateData = {};
+
+    switch(status) {
+      case 'on_hold':
+        updateData = {
+          status: 'on_hold',
+          holdReason: holdReason || 'Manual hold by admin',
+          heldAt: new Date(),
+          holdSource: 'consolidation',
+          consolidationId: consolidation._id,
+          holdNotes: notes
+        };
+        milestoneDescription = `Shipment placed on hold within consolidation ${consolidation.consolidationNumber}. Reason: ${updateData.holdReason}`;
+        console.log('⏸️ Shipment on hold:', shipment.trackingNumber);
+        break;
+
+      case 'cancelled':
+        updateData = {
+          status: 'cancelled',
+          cancellationReason: cancellationReason || 'Cancelled from consolidation',
+          cancelledAt: new Date(),
+          cancelledBy: req.user._id,
+          cancelledFromConsolidation: true,
+          previousConsolidationId: consolidation._id
+        };
+        milestoneDescription = `Shipment cancelled and removed from consolidation ${consolidation.consolidationNumber}. Reason: ${updateData.cancellationReason}`;
+        console.log('❌ Shipment cancelled:', shipment.trackingNumber);
+        break;
+
+      case 'resume':  // ✅ in_progress এর পরিবর্তে resume
+      case 'in_progress':
+        if (previousStatus === 'on_hold') {
+          updateData = {
+            status: 'pending',  // ✅ pending use করুন
+            // অথবা আপনার business logic অনুযায়ী অন্য status
+            resumedAt: new Date(),
+            previousStatus: 'on_hold',
+            holdReason: null,
+            heldAt: null,
+            holdSource: null,
+            holdNotes: null
+          };
+          milestoneDescription = `Shipment resumed from hold within consolidation ${consolidation.consolidationNumber}. ${notes || ''}`;
+          console.log('▶️ Shipment resumed:', shipment.trackingNumber);
+        }
+        break;
+
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status transition: ${previousStatus} → ${status}`
+        });
+    }
+
+    Object.assign(shipment, updateData);
+    shipment.updatedBy = req.user._id;
+
+    if (!shipment.milestones) shipment.milestones = [];
+    shipment.milestones.push({
+      status: updateData.status || status,
+      location: consolidation.originWarehouse || 'Consolidation',
+      description: milestoneDescription,
+      timestamp: new Date(),
+      updatedBy: req.user._id
+    });
+
+    await shipment.save();
+
+    // Handle cancellation
+    if (status === 'cancelled') {
+      consolidation.shipments = consolidation.shipments.filter(
+        s => s._id.toString() !== shipmentId
+      );
+
+      if (consolidation.items) {
+        consolidation.items = consolidation.items.filter(
+          item => item.shipmentId?.toString() !== shipmentId
+        );
+      }
+
+      const remainingShipments = await Shipment.find({
+        _id: { $in: consolidation.shipments },
+        status: { $nin: ['cancelled'] }
+      });
+
+      consolidation.totalShipments = remainingShipments.length;
+      consolidation.totalPackages = remainingShipments.reduce((sum, s) => sum + (s.shipmentDetails?.totalPackages || 0), 0);
+      consolidation.totalWeight = remainingShipments.reduce((sum, s) => sum + (s.shipmentDetails?.totalWeight || 0), 0);
+      consolidation.totalVolume = remainingShipments.reduce((sum, s) => sum + (s.shipmentDetails?.totalVolume || 0), 0);
+
+      if (!consolidation.cancelledShipments) {
+        consolidation.cancelledShipments = [];
+      }
+      consolidation.cancelledShipments.push({
+        shipmentId: shipment._id,
+        trackingNumber: shipment.trackingNumber,
+        reason: cancellationReason,
+        cancelledAt: new Date(),
+        cancelledBy: req.user._id
+      });
+
+      await consolidation.save();
+    }
+
+    // Add timeline entry to consolidation
+    if (!consolidation.timeline) consolidation.timeline = [];
+    consolidation.timeline.push({
+      status: `shipment_${status}`,
+      timestamp: new Date(),
+      description: `Shipment ${shipment.trackingNumber} ${status === 'on_hold' ? 'on hold' : status === 'cancelled' ? 'cancelled' : 'resumed'}. ${notes || ''}`,
+      updatedBy: req.user._id,
+      shipmentId: shipment._id
+    });
+    
+    await consolidation.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Shipment ${status === 'on_hold' ? 'put on hold' : 
+                           status === 'cancelled' ? 'cancelled and removed' : 
+                           'resumed'} successfully`,
+      data: {
+        shipment: {
+          _id: shipment._id,
+          trackingNumber: shipment.trackingNumber,
+          status: shipment.status,
+          ...(status === 'on_hold' && { holdReason: shipment.holdReason, heldAt: shipment.heldAt }),
+          ...(status === 'cancelled' && { cancellationReason: shipment.cancellationReason, cancelledAt: shipment.cancelledAt })
+        },
+        consolidation: {
+          _id: consolidation._id,
+          consolidationNumber: consolidation.consolidationNumber,
+          totalShipments: consolidation.totalShipments,
+          totalWeight: consolidation.totalWeight,
+          totalVolume: consolidation.totalVolume
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update shipment in consolidation error:', error);
     res.status(500).json({
       success: false,
       message: error.message

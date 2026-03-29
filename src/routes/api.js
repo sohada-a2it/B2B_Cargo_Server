@@ -166,7 +166,7 @@ router.post(
 // ==================== PUBLIC ROUTES ==================== 
 // ========== PUBLIC TRACKING (No Auth Required) ==========
 router.get('/getAllShipment',protect,  adminOnly, shipmentController.getAllShipments); 
-router.get('/track/:trackingNumber',protect, shipmentController.trackByNumber); 
+router.get('/shipments/track/:trackingNumber',protect, shipmentController.trackByNumber); 
 
 // ========== CUSTOMER ROUTES ==========
 router.get('/my-shipments',protect,  shipmentController.getMyShipments); 
@@ -263,7 +263,27 @@ router.put(
 );
 
 // ========== CONSOLIDATION ==========
+// Update individual shipment inside consolidation
+router.patch('/:consolidationId/shipments/:shipmentId', protect,  adminOnly, 
+  consolidationController.updateShipmentInConsolidation
+);
 
+// Get on hold shipments in consolidation
+router.get('/:id/on-hold-shipments', 
+  protect,  adminOnly, 
+  consolidationController.getOnHoldShipments
+);
+
+// Resume all on hold shipments in consolidation
+router.post('/:id/resume-all',protect,  adminOnly, 
+  consolidationController.resumeAllOnHoldShipments
+);
+
+// Get cancelled shipments from consolidation
+router.get('/:id/cancelled-shipments', 
+  protect,  adminOnly, 
+  consolidationController.getCancelledShipments
+);
 // // Get all consolidations
 // router.get(
 //     '/consolidations',

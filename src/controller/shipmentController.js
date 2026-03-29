@@ -469,6 +469,8 @@ exports.deleteShipment = async (req, res) => {
 };
 
 // ========== 6. UPDATE SHIPMENT STATUS ==========
+// controllers/shipmentController.js - updateShipmentStatus ফাংশন আপডেট করুন
+
 exports.updateShipmentStatus = async (req, res) => {
     try {
         const { id } = req.params;
@@ -484,44 +486,84 @@ exports.updateShipmentStatus = async (req, res) => {
             });
         }
 
-        // Add milestone
-        shipment.addMilestone(status, location, description, req.user._id);
+        // ✅ Status validation
+        const validStatuses = [
+            'pending', 'picked_up_from_warehouse', 'departed_port_of_origin',
+            'in_transit', 'arrived_at_destination_port', 'customs_cleared',
+            'out_for_delivery', 'delivered', 'completed', 'cancelled'
+        ];
+
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status: ${status}`
+            });
+        }
+
+        // ✅ Add milestone with proper logging
+        shipment.milestones.push({
+            status,
+            location: location || shipment.currentLocation,
+            description: description || `Status updated to ${status}`,
+            updatedBy: req.user._id,
+            timestamp: new Date()
+        });
         
-        // Update status
+        // ✅ Update status
         shipment.status = status;
+        shipment.currentMilestone = status;
         shipment.updatedBy = req.user._id;
 
-        // Update specific fields based on status
+        // ✅ Update specific fields based on status
         switch(status) {
-            case 'received_at_warehouse':
-                shipment.warehouseInfo = {
-                    ...shipment.warehouseInfo,
-                    receivedDate: new Date(),
-                    receivedBy: req.user._id
+            case 'arrived_at_destination_port':
+                shipment.transport = {
+                    ...shipment.transport,
+                    actualArrival: new Date(),
+                    currentLocation: {
+                        location: location || shipment.shipmentDetails?.destination,
+                        status: status,
+                        timestamp: new Date()
+                    }
                 };
+                console.log('✅ Shipment arrived at destination port:', shipment.trackingNumber);
                 break;
                 
-            case 'in_transit':
-                if (shipment.transport) {
-                    shipment.transport.actualDeparture = new Date();
-                }
+            case 'customs_cleared':
+                console.log('✅ Customs cleared for:', shipment.trackingNumber);
+                break;
+                
+            case 'out_for_delivery':
+                console.log('✅ Shipment out for delivery:', shipment.trackingNumber);
                 break;
                 
             case 'delivered':
-                shipment.actualDeliveryDate = new Date();
+            case 'completed':
+                shipment.dates = {
+                    ...shipment.dates,
+                    delivered: new Date()
+                };
+                shipment.courier = {
+                    ...shipment.courier,
+                    actualDeliveryDate: new Date()
+                };
+                console.log('✅ Shipment delivered:', shipment.trackingNumber);
                 break;
         }
 
         await shipment.save();
+        
+        // ✅ Log for debugging
+        console.log(`✅ Status updated: ${shipment.trackingNumber} -> ${status}`);
 
         // Notify customer if requested
-        if (notifyCustomer && shipment.customerId) {
+        if (notifyCustomer && shipment.customerId?.email) {
             sendEmail({
                 to: shipment.customerId.email,
                 subject: `🚚 Shipment Update: ${status.replace(/_/g, ' ')}`,
                 template: 'shipment-status-update',
                 data: {
-                    customerName: shipment.customerId.firstName,
+                    customerName: shipment.customerId.firstName || 'Customer',
                     trackingNumber: shipment.trackingNumber,
                     status: status.replace(/_/g, ' '),
                     location: location || 'Unknown',
@@ -542,6 +584,7 @@ exports.updateShipmentStatus = async (req, res) => {
         });
 
     } catch (error) {
+        console.error('Error in updateShipmentStatus:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -1264,7 +1307,7 @@ exports.getShipmentStatistics = async (req, res) => {
 };
 
 // ========== 23. TRACK BY NUMBER (Public) ========== 
-// ========== 23. TRACK BY NUMBER (Public) ========== 
+
 exports.trackByNumber = async (req, res) => {
     try {
         const { trackingNumber } = req.params;
@@ -1280,153 +1323,127 @@ exports.trackByNumber = async (req, res) => {
             });
         }
 
-        // ডেস্টিনেশন নির্ধারণ
+        // ✅ Check if shipment has arrived at destination
+        const hasArrivedAtDestination = shipment.milestones?.some(m => 
+            m.status === 'arrived_at_destination_port' || 
+            m.status === 'arrived'
+        ) || shipment.status === 'arrived_at_destination_port';
+
+        // ✅ Check if customs cleared
+        const customsCleared = shipment.milestones?.some(m => 
+            m.status === 'customs_cleared'
+        ) || shipment.status === 'customs_cleared';
+
+        // ✅ Check if out for delivery
+        const outForDelivery = shipment.milestones?.some(m => 
+            m.status === 'out_for_delivery'
+        ) || shipment.status === 'out_for_delivery';
+
+        // ✅ Check if delivered
+        const isDelivered = shipment.milestones?.some(m => 
+            m.status === 'delivered' || m.status === 'completed'
+        ) || shipment.status === 'delivered' || shipment.status === 'completed';
+
         const destination = shipment.shipmentDetails?.destination || 
                            shipment.receiver?.address?.country || 
                            'UK';
 
-        // চেক করুন শিপমেন্ট ডেস্টিনেশনে পৌঁছেছে কিনা
-        const hasArrived = shipment.milestones?.some(m => 
-            m.status?.toLowerCase().includes('arrived_at_destination_port') || 
-            m.status?.toLowerCase().includes('arrived')
-        ) || shipment.status?.toLowerCase().includes('arrived');
+        // ✅ Get all milestones sorted
+        const sortedMilestones = [...(shipment.milestones || [])]
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-        console.log('🚩 Has Arrived:', hasArrived);
-        console.log('📍 Destination:', destination);
-
-        // Combine milestones and tracking updates for complete timeline
-        const timeline = [
-            ...(shipment.milestones || []).map(m => {
-                // লোকেশন ফিক্স করুন
-                let location = m.location;
-                
-                // ডেলিভারি/কমপ্লিট স্ট্যাটাস - সবসময় ডেস্টিনেশন দেখান
-                if (m.status?.toLowerCase().includes('delivered') || 
-                    m.status?.toLowerCase().includes('completed')) {
-                    location = destination;
-                }
-                // কাস্টমস ক্লিয়ারড এবং ডেস্টিনেশনে পৌঁছে থাকলে
-                else if (m.status?.toLowerCase().includes('customs_cleared') && hasArrived) {
-                    location = destination;
-                }
-                // আউট ফর ডেলিভারি
-                else if (m.status?.toLowerCase().includes('out_for_delivery')) {
-                    location = destination;
-                }
-                // অ্যারাইভড
-                else if (m.status?.toLowerCase().includes('arrived')) {
-                    location = destination;
-                }
-                
-                return {
-                    type: 'milestone',
-                    status: m.status,
-                    location: location,
-                    description: m.description,
-                    timestamp: m.timestamp,
-                    formattedDate: m.timestamp ? new Date(m.timestamp).toLocaleString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    }) : null
-                };
-            }),
-            ...(shipment.trackingUpdates || []).map(t => {
-                // লোকেশন ফিক্স করুন
-                let location = t.location;
-                
-                if (t.status?.toLowerCase().includes('delivered') || 
-                    t.status?.toLowerCase().includes('completed')) {
-                    location = destination;
-                }
-                else if (t.status?.toLowerCase().includes('customs_cleared') && hasArrived) {
-                    location = destination;
-                }
-                else if (t.status?.toLowerCase().includes('out_for_delivery')) {
-                    location = destination;
-                }
-                else if (t.status?.toLowerCase().includes('arrived')) {
-                    location = destination;
-                }
-                
-                return {
-                    type: 'tracking',
-                    status: t.status,
-                    location: location,
-                    description: t.description,
-                    timestamp: t.timestamp,
-                    formattedDate: t.timestamp ? new Date(t.timestamp).toLocaleString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    }) : null
-                };
-            })
-        ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-        // Determine current location based on latest event
+        // ✅ Determine current location based on latest milestone
         let currentLocation = 'In Transit';
-        if (timeline.length > 0) {
-            const latestEvent = timeline[0];
-            
-            if (latestEvent.status?.toLowerCase().includes('delivered') || 
-                latestEvent.status?.toLowerCase().includes('completed') ||
-                latestEvent.status?.toLowerCase().includes('out_for_delivery')) {
-                currentLocation = destination;
-            }
-            else if (latestEvent.status?.toLowerCase().includes('arrived')) {
-                currentLocation = destination;
-            }
-            else if (latestEvent.status?.toLowerCase().includes('customs_cleared') && hasArrived) {
-                currentLocation = destination;
-            }
-            else {
-                currentLocation = latestEvent.location || 'In Transit';
-            }
+        let currentStatus = shipment.status;
+
+        if (isDelivered) {
+            currentLocation = destination;
+            currentStatus = 'delivered';
+        } 
+        else if (outForDelivery) {
+            currentLocation = destination;
+            currentStatus = 'out_for_delivery';
+        }
+        else if (customsCleared && hasArrivedAtDestination) {
+            currentLocation = destination;
+            currentStatus = 'customs_cleared';
+        }
+        else if (hasArrivedAtDestination) {
+            currentLocation = destination;
+            currentStatus = 'arrived_at_destination_port';
+        }
+        else if (sortedMilestones.length > 0) {
+            currentLocation = sortedMilestones[0].location || 'In Transit';
+            currentStatus = sortedMilestones[0].status;
         }
 
-        // Calculate progress based on status (সর্বোচ্চ প্রগ্রেস টাইমলাইন থেকে নিন)
-        const calculateProgress = (status) => {
+        // ✅ Format timeline
+        const timeline = sortedMilestones.map(m => {
+            let location = m.location;
+            
+            if (m.status === 'delivered' || m.status === 'completed') {
+                location = destination;
+            }
+            else if (m.status === 'out_for_delivery') {
+                location = destination;
+            }
+            else if (m.status === 'customs_cleared' && hasArrivedAtDestination) {
+                location = destination;
+            }
+            else if (m.status === 'arrived_at_destination_port') {
+                location = destination;
+            }
+            
+            return {
+                type: 'milestone',
+                status: m.status,
+                location: location,
+                description: m.description,
+                timestamp: m.timestamp,
+                formattedDate: m.timestamp ? new Date(m.timestamp).toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : null
+            };
+        });
+
+        // ✅ Calculate accurate progress
+        const calculateProgress = (status, milestones) => {
             const progressMap = {
                 'pending': 10,
                 'picked_up_from_warehouse': 20,
-                'received_at_warehouse': 25,
-                'pending_consolidation': 28,
-                'consolidating': 29,
-                'consolidated': 30,
-                'ready_for_dispatch': 35,
-                'loaded_in_container': 38,
-                'dispatched': 40,
-                'departed_port_of_origin': 45,
-                'in_transit_sea_freight': 50,
-                'in_transit_air_freight': 50,
+                'departed_port_of_origin': 40,
                 'in_transit': 50,
                 'arrived_at_destination_port': 70,
-                'arrived': 70,
                 'customs_cleared': 80,
                 'out_for_delivery': 90,
                 'delivered': 100,
                 'completed': 100
             };
             
-            // টাইমলাইন থেকে সর্বোচ্চ প্রগ্রেস বের করুন
-            const maxProgress = Math.max(...timeline.map(t => {
-                const prog = progressMap[t.status?.toLowerCase()];
-                return prog || 0;
-            }));
+            // Get highest progress from milestones
+            let maxProgress = 0;
+            for (const m of milestones) {
+                const progress = progressMap[m.status] || 0;
+                if (progress > maxProgress) {
+                    maxProgress = progress;
+                }
+            }
             
-            return maxProgress || progressMap[status?.toLowerCase()] || 50;
+            // Return highest progress, default to status-based if none found
+            return maxProgress > 0 ? maxProgress : (progressMap[status] || 0);
         };
+
+        const progress = calculateProgress(shipment.status, shipment.milestones || []);
 
         res.status(200).json({
             success: true,
             data: {
                 trackingNumber: shipment.trackingNumber,
-                status: shipment.status,
+                status: currentStatus,
                 currentLocation: currentLocation,
                 origin: shipment.shipmentDetails?.origin || shipment.sender?.address?.country || 'China Warehouse',
                 destination: destination,
@@ -1434,7 +1451,7 @@ exports.trackByNumber = async (req, res) => {
                 estimatedArrival: shipment.transport?.estimatedArrival || shipment.estimatedArrivalDate,
                 actualDelivery: shipment.actualDeliveryDate,
                 timeline: timeline,
-                progress: calculateProgress(shipment.status), // টাইমলাইন অনুযায়ী সর্বোচ্চ প্রগ্রেস
+                progress: progress,
                 sender: {
                     name: shipment.sender?.name,
                     country: shipment.sender?.address?.country
@@ -1446,7 +1463,7 @@ exports.trackByNumber = async (req, res) => {
                 packages: (shipment.packages || []).map(pkg => ({
                     id: pkg._id,
                     description: pkg.description,
-                    type: pkg.packageType,
+                    type: pkg.packagingType || pkg.packageType,
                     quantity: pkg.quantity,
                     weight: pkg.weight,
                     volume: pkg.volume,

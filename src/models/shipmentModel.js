@@ -23,6 +23,7 @@ const shipmentSubTypes = [
 
 const shipmentStatuses = [
     'pending',
+    'in_progress', 
     'picked_up_from_warehouse',
     'departed_port_of_origin',
     'in_transit_sea_freight',
@@ -49,7 +50,7 @@ const shipmentStatuses = [
 const shippingModes = ['DDP', 'DDU', 'FOB', 'CIF'];
 
 // Currencies - Booking-এর সাথে মিল রেখে
-const currencies = ['USD', 'GBP', 'CAD', 'THB', 'CNY', 'EUR', 'BDT'];
+const currencies = ['USD', 'GBP', 'CAD' ];
 
 // Courier Service Types - Booking-এর সাথে মিল রেখে
 const courierServiceTypes = ['standard', 'express', 'overnight', 'economy'];
