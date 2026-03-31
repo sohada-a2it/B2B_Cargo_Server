@@ -5,7 +5,7 @@ const cors = require('cors');
 const route = require('./src/routes/api');
 const quoteRoutes = require('./src/service/quoteTamplate');
 const contactRoutes = require('./src/service/contactTamplate');
-const authRoutes = require('./src/routes/authRoutes'); // NEW: Google auth routes
+const authRoutes = require('./src/routes/AuthRoutes'); // NEW: Google auth routes
 const app = express();
 
 // ===================== MIDDLEWARE =====================
