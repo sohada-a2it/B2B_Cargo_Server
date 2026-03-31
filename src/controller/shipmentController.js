@@ -1595,3 +1595,400 @@ exports.updateShipmentTrackingNumber = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+// new
+// ========== 24. REQUEST RETURN (Customer) ==========
+exports.requestReturn = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { reason, description, images } = req.body;
+
+        // Find shipment
+        const shipment = await Shipment.findOne({
+            _id: id,
+            customerId: req.user._id
+        });
+
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found or access denied'
+            });
+        }
+
+        // Check if shipment is eligible for return
+        const eligibleStatuses = ['delivered', 'completed'];
+        if (!eligibleStatuses.includes(shipment.status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Shipment cannot be returned. Current status: ${shipment.status}. Only delivered/completed shipments can be returned.`
+            });
+        }
+
+        // Check if return already requested
+        if (shipment.returnRequest && shipment.returnRequest.status !== 'none') {
+            return res.status(400).json({
+                success: false,
+                message: `Return already ${shipment.returnRequest.status}. Please wait for admin response.`
+            });
+        }
+
+        // Check delivery date (within 14 days)
+        const deliveryDate = shipment.dates?.delivered || shipment.actualDeliveryDate;
+        if (deliveryDate) {
+            const daysSinceDelivery = Math.floor((Date.now() - new Date(deliveryDate)) / (1000 * 60 * 60 * 24));
+            if (daysSinceDelivery > 14) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Return period expired. You can only request return within 14 days of delivery. Days passed: ${daysSinceDelivery}`
+                });
+            }
+        }
+
+        // Create return request
+        shipment.returnRequest = {
+            requestedBy: req.user._id,
+            requestedAt: new Date(),
+            status: 'pending',
+            reason: reason,
+            description: description,
+            images: images || []
+        };
+
+        // Add milestone
+        shipment.milestones = shipment.milestones || [];
+        shipment.milestones.push({
+            status: 'return_requested',
+            location: shipment.shipmentDetails?.destination || 'Customer Location',
+            description: `Return requested by customer. Reason: ${reason}`,
+            updatedBy: req.user._id,
+            timestamp: new Date()
+        });
+
+        await shipment.save();
+
+        // Notify admins
+        const admins = await User.find({ role: 'admin', isActive: true });
+        const adminEmails = admins.map(a => a.email);
+        
+        if (adminEmails.length > 0) {
+            await sendEmail({
+                to: adminEmails,
+                subject: `🔄 Return Request - ${shipment.trackingNumber}`,
+                template: 'return-request-admin',
+                data: {
+                    trackingNumber: shipment.trackingNumber,
+                    customerName: req.user.firstName || 'Customer',
+                    reason: reason,
+                    description: description,
+                    requestDate: new Date().toLocaleString(),
+                    shipmentUrl: `${process.env.FRONTEND_URL}/admin/shipments/${shipment._id}`,
+                    daysSinceDelivery: deliveryDate ? Math.floor((Date.now() - new Date(deliveryDate)) / (1000 * 60 * 60 * 24)) : 'Unknown'
+                }
+            }).catch(err => console.log('Admin notification error:', err.message));
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Return request submitted successfully. Admin will review and notify you.',
+            data: {
+                returnRequest: shipment.returnRequest,
+                trackingNumber: shipment.trackingNumber
+            }
+        });
+
+    } catch (error) {
+        console.error('Request return error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== 25. GET RETURN REQUEST STATUS (Customer) ==========
+exports.getReturnRequestStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const shipment = await Shipment.findOne({
+            _id: id,
+            customerId: req.user._id
+        }).select('trackingNumber returnRequest status');
+
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: {
+                trackingNumber: shipment.trackingNumber,
+                shipmentStatus: shipment.status,
+                returnRequest: shipment.returnRequest || { status: 'none' }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get return status error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== 26. GET ALL RETURN REQUESTS (Admin) ==========
+exports.getAllReturnRequests = async (req, res) => {
+    try {
+        const { status, page = 1, limit = 20 } = req.query;
+
+        let query = { 'returnRequest.status': { $ne: 'none' } };
+        if (status) query['returnRequest.status'] = status;
+
+        const shipments = await Shipment.find(query)
+            .populate('customerId', 'firstName lastName email phone')
+            .populate('returnRequest.requestedBy', 'firstName lastName email')
+            .populate('returnRequest.approvedBy', 'firstName lastName email')
+            .sort({ 'returnRequest.requestedAt': -1 })
+            .skip((page - 1) * limit)
+            .limit(parseInt(limit));
+
+        const total = await Shipment.countDocuments(query);
+
+        // Summary
+        const summary = await Shipment.aggregate([
+            { $match: { 'returnRequest.status': { $ne: 'none' } } },
+            { $group: {
+                _id: '$returnRequest.status',
+                count: { $sum: 1 }
+            }}
+        ]);
+
+        res.status(200).json({
+            success: true,
+            data: shipments,
+            summary,
+            pagination: {
+                total,
+                page: parseInt(page),
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+
+    } catch (error) {
+        console.error('Get return requests error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== 27. APPROVE RETURN REQUEST (Admin) ==========
+exports.approveReturnRequest = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { returnTrackingNumber, notes } = req.body;
+
+        const shipment = await Shipment.findById(id)
+            .populate('customerId', 'email firstName lastName');
+
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found'
+            });
+        }
+
+        if (!shipment.returnRequest || shipment.returnRequest.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: 'No pending return request found'
+            });
+        }
+
+        // Update return request
+        shipment.returnRequest.status = 'approved';
+        shipment.returnRequest.approvedBy = req.user._id;
+        shipment.returnRequest.approvedAt = new Date();
+        shipment.returnRequest.returnTrackingNumber = returnTrackingNumber;
+        shipment.returnRequest.returnNotes = notes;
+
+        // Update shipment status
+        shipment.status = 'return_initiated';
+
+        // Add milestone
+        shipment.milestones.push({
+            status: 'return_approved',
+            location: 'System',
+            description: `Return request approved. Return tracking: ${returnTrackingNumber || 'To be provided'}. ${notes || ''}`,
+            updatedBy: req.user._id,
+            timestamp: new Date()
+        });
+
+        await shipment.save();
+
+        // Notify customer
+        if (shipment.customerId?.email) {
+            await sendEmail({
+                to: shipment.customerId.email,
+                subject: `✅ Return Request Approved - ${shipment.trackingNumber}`,
+                template: 'return-approved-customer',
+                data: {
+                    customerName: shipment.customerId.firstName || 'Customer',
+                    trackingNumber: shipment.trackingNumber,
+                    returnTrackingNumber: returnTrackingNumber || 'Will be provided soon',
+                    notes: notes || '',
+                    returnInstructions: 'Please pack the items securely and wait for pickup. You will receive a return shipping label via email.',
+                    dashboardUrl: `${process.env.FRONTEND_URL}/customer/shipments/${shipment._id}`
+                }
+            }).catch(err => console.log('Customer notification error:', err.message));
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Return request approved successfully',
+            data: shipment.returnRequest
+        });
+
+    } catch (error) {
+        console.error('Approve return error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== 28. REJECT RETURN REQUEST (Admin) ==========
+exports.rejectReturnRequest = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rejectionReason } = req.body;
+
+        if (!rejectionReason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rejection reason is required'
+            });
+        }
+
+        const shipment = await Shipment.findById(id)
+            .populate('customerId', 'email firstName lastName');
+
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found'
+            });
+        }
+
+        if (!shipment.returnRequest || shipment.returnRequest.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: 'No pending return request found'
+            });
+        }
+
+        // Update return request
+        shipment.returnRequest.status = 'rejected';
+        shipment.returnRequest.rejectionReason = rejectionReason;
+        shipment.returnRequest.approvedBy = req.user._id;
+        shipment.returnRequest.approvedAt = new Date();
+
+        // Add milestone
+        shipment.milestones.push({
+            status: 'return_rejected',
+            location: 'System',
+            description: `Return request rejected. Reason: ${rejectionReason}`,
+            updatedBy: req.user._id,
+            timestamp: new Date()
+        });
+
+        await shipment.save();
+
+        // Notify customer
+        if (shipment.customerId?.email) {
+            await sendEmail({
+                to: shipment.customerId.email,
+                subject: `❌ Return Request Rejected - ${shipment.trackingNumber}`,
+                template: 'return-rejected-customer',
+                data: {
+                    customerName: shipment.customerId.firstName || 'Customer',
+                    trackingNumber: shipment.trackingNumber,
+                    rejectionReason: rejectionReason,
+                    supportEmail: process.env.SUPPORT_EMAIL || 'support@cargologistics.com'
+                }
+            }).catch(err => console.log('Customer notification error:', err.message));
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Return request rejected',
+            data: shipment.returnRequest
+        });
+
+    } catch (error) {
+        console.error('Reject return error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== 29. MARK RETURN AS COMPLETED (Admin) ==========
+exports.completeReturn = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { notes } = req.body;
+
+        const shipment = await Shipment.findById(id)
+            .populate('customerId', 'email firstName lastName');
+
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found'
+            });
+        }
+
+        if (!shipment.returnRequest || shipment.returnRequest.status !== 'approved') {
+            return res.status(400).json({
+                success: false,
+                message: 'Return request not in approved state'
+            });
+        }
+
+        // Update return request
+        shipment.returnRequest.status = 'completed';
+        shipment.returnRequest.returnNotes = notes;
+
+        // Update shipment status
+        shipment.status = 'returned';
+
+        // Add milestone
+        shipment.milestones.push({
+            status: 'return_completed',
+            location: 'System',
+            description: `Return process completed. ${notes || ''}`,
+            updatedBy: req.user._id,
+            timestamp: new Date()
+        });
+
+        await shipment.save();
+
+        // Notify customer
+        if (shipment.customerId?.email) {
+            await sendEmail({
+                to: shipment.customerId.email,
+                subject: `✅ Return Completed - ${shipment.trackingNumber}`,
+                template: 'return-completed-customer',
+                data: {
+                    customerName: shipment.customerId.firstName || 'Customer',
+                    trackingNumber: shipment.trackingNumber,
+                    notes: notes || 'Return process completed successfully.',
+                    dashboardUrl: `${process.env.FRONTEND_URL}/customer/shipments/${shipment._id}`
+                }
+            }).catch(err => console.log('Customer notification error:', err.message));
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Return completed successfully',
+            data: shipment.returnRequest
+        });
+
+    } catch (error) {
+        console.error('Complete return error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};

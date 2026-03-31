@@ -7,7 +7,7 @@ const User = require('../models/userModel');
 const { sendEmail } = require('../utils/emailService');
 const { generateTrackingNumber } = require('../utils/trackingGenerator');
 const mongoose = require('mongoose');
-const { generateInvoicePDFBuffer } = require('../service/pdfGenerator');
+const { generateInvoicePDFBuffer } = require('../service/pdfGenerator'); 
 // ========== HELPER FUNCTIONS ==========
 // ==================== মিসিং হেল্পার ফাংশনগুলো ====================
 // এই ফাংশনগুলো আপনার ফাইলের একদম উপরে, অন্যান্য হেল্পার ফাংশনের পরে যোগ করুন
@@ -320,8 +320,7 @@ if (allRecipients.length > 0) {
             origin: booking.shipmentDetails?.origin || 'N/A',
             destination: booking.shipmentDetails?.destination || 'N/A',
             totalPackages: booking.shipmentDetails?.totalPackages || 0,
-            totalWeight: booking.shipmentDetails?.totalWeight || 0,
-            // bookingUrl: `${process.env.FRONTEND_URL}/admin/bookings/${booking._id}`,
+            totalWeight: booking.shipmentDetails?.totalWeight || 0, 
             requestedDate: new Date().toLocaleString()
         }
     }).catch(err => console.error('Email error:', err));
@@ -339,8 +338,7 @@ if (allRecipients.length > 0) {
                     bookingNumber: booking.bookingNumber,
                     customerName: booking.sender?.name,
                     origin: booking.sender?.address?.country,
-                    destination: booking.receiver?.address?.country,
-                    // dashboardUrl: `${process.env.FRONTEND_URL}/customer/dashboard`,
+                    destination: booking.receiver?.address?.country, 
                     supportEmail: process.env.SUPPORT_EMAIL
                 }
             }).catch(err => console.error('Email error:', err));
@@ -809,7 +807,7 @@ exports.acceptQuote = async (req, res) => {
                     await sendEmail({
                         to: warehouseStaff.map(w => w.email),
                         subject: '📦 New Shipment Ready for Warehouse Processing',
-                        template: 'new-shipment-warehouse',
+                        template: 'new-shipment-notification',
                         data: {
                             trackingNumber: trackingNumber,
                             customerName: booking.sender?.name || 'Customer',
@@ -845,153 +843,164 @@ exports.acceptQuote = async (req, res) => {
         }
 
         // ===== STEP 2: CREATE INVOICE AND GENERATE PDF =====
-        console.log('7. Creating invoice and generating PDF...');
+// ===== STEP 2: CREATE INVOICE AND GENERATE PDF =====
+console.log('7. Creating invoice and generating PDF...');
 
-        let invoice = null;
-        let pdfBuffer = null;
-        
-        try {
-            const breakdown = booking.quotedPrice?.breakdown || {};
-            
-            const charges = [];
-            
-            const chargeMappings = [
-                { field: 'baseRate', description: 'Base shipping rate', type: 'Freight Cost' },
-                { field: 'weightCharge', description: 'Weight-based charge', type: 'Weight Charge' },
-                { field: 'fuelSurcharge', description: 'Fuel surcharge', type: 'Fuel Surcharge' },
-                { field: 'residentialSurcharge', description: 'Residential delivery surcharge', type: 'Residential Surcharge' },
-                { field: 'insurance', description: 'Cargo insurance', type: 'Insurance' },
-                { field: 'tax', description: 'Tax/VAT', type: 'Tax' },
-                { field: 'otherCharges', description: 'Other miscellaneous charges', type: 'Other' }
-            ];
+let invoice = null;
+let pdfBuffer = null;
 
-            chargeMappings.forEach(mapping => {
-                if (breakdown[mapping.field] && breakdown[mapping.field] > 0) {
-                    charges.push({
-                        description: mapping.description,
-                        type: mapping.type,
-                        amount: breakdown[mapping.field],
-                        currency: booking.quotedPrice?.currency || 'USD'
-                    });
-                }
+try {
+    const breakdown = booking.quotedPrice?.breakdown || {};
+    
+    const charges = [];
+    
+    const chargeMappings = [
+        { field: 'baseRate', description: 'Base shipping rate', type: 'Freight Cost' },
+        { field: 'weightCharge', description: 'Weight-based charge', type: 'Weight Charge' },
+        { field: 'fuelSurcharge', description: 'Fuel surcharge', type: 'Fuel Surcharge' },
+        { field: 'residentialSurcharge', description: 'Residential delivery surcharge', type: 'Residential Surcharge' },
+        { field: 'insurance', description: 'Cargo insurance', type: 'Insurance' },
+        { field: 'tax', description: 'Tax/VAT', type: 'Tax' },
+        { field: 'otherCharges', description: 'Other miscellaneous charges', type: 'Other' }
+    ];
+
+    chargeMappings.forEach(mapping => {
+        if (breakdown[mapping.field] && breakdown[mapping.field] > 0) {
+            charges.push({
+                description: mapping.description,
+                type: mapping.type,
+                amount: breakdown[mapping.field],
+                currency: booking.quotedPrice?.currency || 'USD'
             });
-
-            if (charges.length === 0 && booking.quotedPrice?.amount) {
-                charges.push({
-                    description: 'Total shipping cost including all services',
-                    type: 'Freight Cost',
-                    amount: booking.quotedPrice.amount,
-                    currency: booking.quotedPrice.currency || 'USD'
-                });
-            }
-
-            const subtotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
-
-            const invoiceData = {
-                bookingId: booking._id,
-                shipmentId: shipment?._id,
-                customerId: booking.customer._id,
-                
-                customerInfo: {
-                    companyName: booking.sender?.companyName || '',
-                    contactPerson: booking.sender?.name || '',
-                    email: booking.sender?.email,
-                    phone: booking.sender?.phone || '',
-                    address: booking.sender?.address?.addressLine1 || ''
-                },
-                
-                invoiceDate: new Date(),
-                dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-                
-                charges: charges,
-                subtotal: subtotal,
-                totalAmount: subtotal,
-                
-                currency: booking.quotedPrice?.currency || 'USD',
-                paymentStatus: 'pending',
-                status: 'draft',
-                paymentTerms: 'Due within 30 days',
-                
-                createdBy: req.user._id
-            };
-
-            invoice = await Invoice.create(invoiceData);
-            
-            booking.invoiceId = invoice._id;
-            await booking.save();
-            
-            console.log('   ✅ Invoice created:', {
-                id: invoice._id,
-                number: invoice.invoiceNumber,
-                amount: invoice.totalAmount
-            });
-
-            // ===== GENERATE PDF =====
-            console.log('   📄 Generating PDF invoice...');
-            try {
-                const { generateInvoicePDFBuffer } = require('../services/pdfGenerator');
-                
-                const companyInfo = {
-                    name: 'Cargo Logistics Group',
-                    address: '123 Business Avenue, Commercial Area',
-                    city: 'Dhaka, Bangladesh 1212',
-                    phone: '+880 1234-567890',
-                    email: 'info@cargologistics.com',
-                    website: 'www.cargologistics.com'
-                };
-                
-                pdfBuffer = await generateInvoicePDFBuffer(invoice, companyInfo);
-                console.log('   ✅ PDF generated successfully, size:', pdfBuffer.length, 'bytes');
-                
-                invoice.pdfGeneratedAt = new Date();
-                invoice.pdfSize = pdfBuffer.length;
-                await invoice.save();
-                
-            } catch (pdfError) {
-                console.error('   ❌ PDF generation failed:', pdfError.message);
-                console.error('   Error stack:', pdfError.stack);
-            }
-
-        } catch (invoiceError) {
-            console.error('❌ Invoice creation error:', invoiceError.message);
         }
+    });
+
+    if (charges.length === 0 && booking.quotedPrice?.amount) {
+        charges.push({
+            description: 'Total shipping cost including all services',
+            type: 'Freight Cost',
+            amount: booking.quotedPrice.amount,
+            currency: booking.quotedPrice.currency || 'USD'
+        });
+    }
+
+    const subtotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
+
+    const invoiceData = {
+        bookingId: booking._id,
+        shipmentId: shipment?._id,
+        customerId: booking.customer._id,
+        
+        customerInfo: {
+            companyName: booking.sender?.companyName || '',
+            contactPerson: booking.sender?.name || '',
+            email: booking.sender?.email,
+            phone: booking.sender?.phone || '',
+            address: booking.sender?.address?.addressLine1 || ''
+        },
+        
+        invoiceDate: new Date(),
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        
+        charges: charges,
+        subtotal: subtotal,
+        totalAmount: subtotal,
+        
+        currency: booking.quotedPrice?.currency || 'USD',
+        paymentStatus: 'pending',
+        status: 'draft',
+        paymentTerms: 'Due within 30 days',
+        
+        createdBy: req.user._id
+    };
+
+    // 🔥 গুরুত্বপূর্ণ: invoiceNumber সেট করছি না - model auto-generate করবে
+    invoice = await Invoice.create(invoiceData);
+    
+    booking.invoiceId = invoice._id;
+    await booking.save();
+    
+    console.log('   ✅ Invoice created:', {
+        id: invoice._id,
+        number: invoice.invoiceNumber,
+        amount: invoice.totalAmount
+    });
+
+    // ===== GENERATE PDF =====
+    console.log('   📄 Generating PDF invoice...');
+    try {
+        
+        
+        const companyInfo = {
+            name: 'Cargo Logistics Group',
+            address: '123 Business Avenue, Commercial Area',
+            city: 'Dhaka, Bangladesh 1212',
+            phone: '+880 1234-567890',
+            email: 'info@cargologistics.com',
+            website: 'www.cargologistics.com'
+        };
+        
+        pdfBuffer = await generateInvoicePDFBuffer(invoice, companyInfo);
+        console.log('   ✅ PDF generated successfully, size:', pdfBuffer.length, 'bytes');
+        
+        invoice.pdfGeneratedAt = new Date();
+        invoice.pdfSize = pdfBuffer.length;
+        await invoice.save();
+        
+    } catch (pdfError) {
+        console.error('   ❌ PDF generation failed:', pdfError.message);
+    }
+
+} catch (invoiceError) {
+    console.error('❌ Invoice creation error:', invoiceError.message);
+}
 
         // ===== STEP 3: Send Emails with PDF Attachment =====
-        console.log('8. Sending confirmation emails with PDF...');
+        // ===== STEP 3: Send Emails with PDF Attachment =====
+console.log('8. Sending confirmation emails with PDF...');
+console.log('   📧 PDF Buffer status:', pdfBuffer ? `${pdfBuffer.length} bytes` : 'NOT GENERATED');
 
-        // Customer Email with PDF Attachment
-        if (booking.sender?.email) {
-            const emailData = {
-                to: booking.sender.email,
-                subject: '🎉 Booking Confirmed! - Cargo Logistics',
-                template: 'booking-confirmed-customer',
-                data: {
-                    customerName: booking.sender?.name || 'Customer',
-                    bookingNumber: booking.bookingNumber,
-                    trackingNumber: trackingNumber,
-                    quotedAmount: booking.quotedPrice?.amount || 0,
-                    currency: booking.quotedPrice?.currency || 'USD',
-                    invoiceNumber: invoice?.invoiceNumber || 'N/A',
-                    origin: booking.shipmentDetails?.origin || 'N/A',
-                    destination: booking.shipmentDetails?.destination || 'N/A',
-                    estimatedDelivery: booking.dates?.estimatedArrival ? 
-                        new Date(booking.dates.estimatedArrival).toLocaleDateString() : 
-                        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()
-                }
-            };
-            
-            if (pdfBuffer && invoice) {
-                emailData.attachments = [{
-                    filename: `invoice-${invoice.invoiceNumber}.pdf`,
-                    content: pdfBuffer,
-                    contentType: 'application/pdf'
-                }];
-                console.log('   📎 PDF attachment added to customer email');
-            }
-            
-            await sendEmail(emailData).catch(err => console.log('Customer email error:', err.message));
-            console.log('✅ Customer email sent to:', booking.sender.email);
+// Customer Email with PDF Attachment
+if (booking.sender?.email) {
+    const emailData = {
+        to: booking.sender.email,
+        subject: '🎉 Booking Confirmed! - Cargo Logistics',
+        template: 'booking-confirmed-customer',
+        data: {
+            customerName: booking.sender?.name || 'Customer',
+            bookingNumber: booking.bookingNumber,
+            trackingNumber: trackingNumber,
+            quotedAmount: booking.quotedPrice?.amount || 0,
+            currency: booking.quotedPrice?.currency || 'USD',
+            invoiceNumber: invoice?.invoiceNumber || 'N/A',
+            origin: booking.shipmentDetails?.origin || 'N/A',
+            destination: booking.shipmentDetails?.destination || 'N/A',
+            estimatedDelivery: booking.dates?.estimatedArrival ? 
+                new Date(booking.dates.estimatedArrival).toLocaleDateString() : 
+                new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()
         }
+    };
+    
+    // ✅ PDF attachment যোগ করুন (যদি buffer থাকে)
+    if (pdfBuffer && invoice && invoice.invoiceNumber) {
+        emailData.attachments = [{
+            filename: `invoice-${invoice.invoiceNumber}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+            encoding: 'utf-8'
+        }];
+        console.log('   📎 PDF attachment added to customer email:', `invoice-${invoice.invoiceNumber}.pdf`);
+    } else {
+        console.log('   ⚠️ No PDF attachment - pdfBuffer:', !!pdfBuffer, 'invoice:', !!invoice);
+    }
+    
+    try {
+        await sendEmail(emailData);
+        console.log('✅ Customer email sent to:', booking.sender.email);
+    } catch (emailError) {
+        console.error('❌ Customer email error:', emailError.message);
+    }
+}
 
         // Receiver Email
         if (booking.receiver?.email) {

@@ -902,15 +902,19 @@ exports.updateConsolidation = async (req, res) => {
     }
 };
 
-// ========== 9. UPDATE CONSOLIDATION STATUS ==========
-// controllers/consolidationController.js - updateConsolidationStatus ফাংশন সম্পূর্ণ আপডেট করুন
+// ========== 9. UPDATE CONSOLIDATION STATUS ========== 
+
+// controllers/consolidationController.js - সম্পূর্ণ replace করুন
 
 exports.updateConsolidationStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, actualDeparture, actualArrival, location, notes } = req.body;
 
-    console.log('🔄 Updating consolidation status:', { id, status, location, notes });
+    console.log('🔄 ===== UPDATE CONSOLIDATION STATUS =====');
+    console.log('🔄 Consolidation ID:', id);
+    console.log('🔄 New status:', status);
+    console.log('🔄 Location:', location);
 
     const consolidation = await Consolidation.findById(id).populate('shipments');
     
@@ -922,20 +926,17 @@ exports.updateConsolidationStatus = async (req, res) => {
     }
 
     const oldStatus = consolidation.status;
-    
-    // ========== UPDATE SHIPMENTS BASED ON CONSOLIDATION STATUS ==========
-    const activeShipments = consolidation.shipments.filter(s => 
-      s.status !== 'cancelled' && s.status !== 'delivered' && s.status !== 'completed'
-    );
+    console.log(`📦 Old status: ${oldStatus} → New status: ${status}`);
 
-    // Map consolidation status to shipment status
+    // ✅ Shipment status mapping - সম্পূর্ণ ম্যাপিং
     const getShipmentStatus = (consolStatus) => {
       const statusMap = {
+        'draft': 'pending',
         'in_progress': 'pending',
-        'consolidated': 'pending',
-        'ready_for_dispatch': 'pending',
-        'loaded': 'pending',
-        'dispatched': 'in_transit',
+        'consolidated': 'consolidated',
+        'ready_for_dispatch': 'ready_for_dispatch',
+        'loaded': 'loaded_in_container',
+        'dispatched': 'dispatched',
         'in_transit': 'in_transit',
         'arrived': 'arrived_at_destination_port',
         'customs_cleared': 'customs_cleared',
@@ -949,34 +950,52 @@ exports.updateConsolidationStatus = async (req, res) => {
     };
 
     const shipmentNewStatus = getShipmentStatus(status);
+    console.log(`📦 Shipment target status: ${shipmentNewStatus}`);
 
-    // Update all active shipments
-    for (const shipment of activeShipments) {
-      console.log(`  📦 Updating shipment ${shipment.trackingNumber}: ${shipment.status} → ${shipmentNewStatus}`);
+    // ✅ Update ALL shipments in this consolidation
+    const updatedShipments = [];
+    
+    for (const shipment of consolidation.shipments) {
+      if (!shipment) continue;
+      
+      console.log(`  📦 Updating shipment: ${shipment.trackingNumber}`);
+      console.log(`     Old status: ${shipment.status} → New: ${shipmentNewStatus}`);
       
       // Update shipment status
       shipment.status = shipmentNewStatus;
       shipment.currentMilestone = shipmentNewStatus;
+      shipment.updatedBy = req.user._id;
       
-      // Add milestone
+      // ✅ Add milestone with proper location
+      let milestoneLocation = location || getLocationForStatus(status, consolidation);
+      let milestoneDescription = getDescriptionForStatus(status, consolidation);
+      
       if (!shipment.milestones) shipment.milestones = [];
+      
       shipment.milestones.push({
         status: shipmentNewStatus,
-        location: location || consolidation.destinationPort || 'In Transit',
-        description: `Consolidation ${consolidation.consolidationNumber} status: ${status}. ${notes || ''}`,
+        location: milestoneLocation,
+        description: `${milestoneDescription} (via consolidation ${consolidation.consolidationNumber})`,
         timestamp: new Date(),
         updatedBy: req.user._id
       });
       
-      // Update transport info based on status
+      // ✅ Update transport info based on status
       if (!shipment.transport) shipment.transport = {};
       
       switch(status) {
         case 'dispatched':
-        case 'in_transit':
           shipment.transport.actualDeparture = actualDeparture || new Date();
           shipment.transport.currentLocation = {
-            location: location || 'In Transit',
+            location: milestoneLocation,
+            status: 'dispatched',
+            timestamp: new Date()
+          };
+          break;
+          
+        case 'in_transit':
+          shipment.transport.currentLocation = {
+            location: milestoneLocation,
             status: 'in_transit',
             timestamp: new Date()
           };
@@ -985,7 +1004,7 @@ exports.updateConsolidationStatus = async (req, res) => {
         case 'arrived':
           shipment.transport.actualArrival = actualArrival || new Date();
           shipment.transport.currentLocation = {
-            location: location || consolidation.destinationPort,
+            location: milestoneLocation,
             status: 'arrived',
             timestamp: new Date()
           };
@@ -993,7 +1012,7 @@ exports.updateConsolidationStatus = async (req, res) => {
           
         case 'customs_cleared':
           shipment.transport.currentLocation = {
-            location: location || consolidation.destinationPort,
+            location: milestoneLocation,
             status: 'customs_cleared',
             timestamp: new Date()
           };
@@ -1001,7 +1020,7 @@ exports.updateConsolidationStatus = async (req, res) => {
           
         case 'out_for_delivery':
           shipment.transport.currentLocation = {
-            location: location || 'Out for Delivery',
+            location: milestoneLocation,
             status: 'out_for_delivery',
             timestamp: new Date()
           };
@@ -1009,10 +1028,10 @@ exports.updateConsolidationStatus = async (req, res) => {
           
         case 'delivered':
         case 'completed':
-          shipment.dates = shipment.dates || {};
+          if (!shipment.dates) shipment.dates = {};
           shipment.dates.delivered = new Date();
           shipment.transport.currentLocation = {
-            location: location || 'Delivered',
+            location: milestoneLocation,
             status: 'delivered',
             timestamp: new Date()
           };
@@ -1020,66 +1039,17 @@ exports.updateConsolidationStatus = async (req, res) => {
       }
       
       await shipment.save();
-      console.log(`  ✅ Shipment ${shipment.trackingNumber} updated to ${shipmentNewStatus}`);
+      updatedShipments.push({
+        id: shipment._id,
+        trackingNumber: shipment.trackingNumber,
+        oldStatus: shipment.status,
+        newStatus: shipmentNewStatus
+      });
+      
+      console.log(`     ✅ Shipment updated successfully`);
     }
 
-    // Handle on_hold status
-    if (status === 'on_hold') {
-      for (const shipment of activeShipments) {
-        shipment.status = 'on_hold';
-        shipment.holdReason = notes || 'Consolidation on hold';
-        shipment.heldAt = new Date();
-        shipment.holdSource = 'consolidation';
-        shipment.milestones.push({
-          status: 'on_hold',
-          location: location || consolidation.originWarehouse,
-          description: `Consolidation on hold: ${notes || 'No reason provided'}`,
-          timestamp: new Date(),
-          updatedBy: req.user._id
-        });
-        await shipment.save();
-      }
-    }
-
-    // Handle resume from hold
-    if (status === 'in_progress' && oldStatus === 'on_hold') {
-      const heldShipments = consolidation.shipments.filter(s => s.status === 'on_hold');
-      for (const shipment of heldShipments) {
-        shipment.status = 'pending';
-        shipment.resumedAt = new Date();
-        shipment.previousStatus = 'on_hold';
-        shipment.holdReason = null;
-        shipment.heldAt = null;
-        shipment.milestones.push({
-          status: 'pending',
-          location: location || consolidation.originWarehouse,
-          description: `Consolidation resumed: ${notes || ''}`,
-          timestamp: new Date(),
-          updatedBy: req.user._id
-        });
-        await shipment.save();
-      }
-    }
-
-    // Handle cancellation
-    if (status === 'cancelled') {
-      for (const shipment of activeShipments) {
-        shipment.status = 'cancelled';
-        shipment.cancellationReason = notes || 'Consolidation cancelled';
-        shipment.cancelledAt = new Date();
-        shipment.cancelledBy = req.user._id;
-        shipment.milestones.push({
-          status: 'cancelled',
-          location: location || consolidation.originWarehouse,
-          description: `Consolidation cancelled: ${notes || 'No reason provided'}`,
-          timestamp: new Date(),
-          updatedBy: req.user._id
-        });
-        await shipment.save();
-      }
-    }
-
-    // Update consolidation status
+    // ✅ Update consolidation
     consolidation.status = status;
     consolidation.updatedBy = req.user._id;
     
@@ -1106,19 +1076,18 @@ exports.updateConsolidationStatus = async (req, res) => {
 
     await consolidation.save();
 
-    console.log(`✅ Consolidation ${consolidation.consolidationNumber} status updated: ${oldStatus} → ${status}`);
-    console.log(`📦 ${activeShipments.length} shipments updated to ${shipmentNewStatus}`);
+    console.log(`✅ Consolidation ${consolidation.consolidationNumber} updated to ${status}`);
+    console.log(`✅ ${updatedShipments.length} shipments updated to ${shipmentNewStatus}`);
 
     res.status(200).json({
       success: true,
       message: `Consolidation ${status === 'on_hold' ? 'put on hold' : 
                                    status === 'cancelled' ? 'cancelled' : 
-                                   status === 'in_progress' && oldStatus === 'on_hold' ? 'resumed' : 
                                    `status updated to ${status}`}`,
       data: {
         consolidation,
-        shipmentsUpdated: activeShipments.length,
-        newShipmentStatus: shipmentNewStatus
+        shipmentUpdates: updatedShipments,
+        shipmentsUpdatedCount: updatedShipments.length
       }
     });
 
@@ -1127,6 +1096,33 @@ exports.updateConsolidationStatus = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ✅ Helper functions
+function getLocationForStatus(status, consolidation) {
+  const locationMap = {
+    'arrived': consolidation.destinationPort || 'Destination Port',
+    'customs_cleared': consolidation.destinationPort || 'Customs',
+    'out_for_delivery': 'Out for Delivery',
+    'delivered': 'Delivered',
+    'completed': 'Completed',
+    'dispatched': 'Dispatched',
+    'in_transit': 'In Transit'
+  };
+  return locationMap[status] || consolidation.originWarehouse || 'Warehouse';
+}
+
+function getDescriptionForStatus(status, consolidation) {
+  const descMap = {
+    'arrived': `Shipment arrived at ${consolidation.destinationPort}`,
+    'customs_cleared': 'Customs clearance completed',
+    'out_for_delivery': 'Shipment out for delivery',
+    'delivered': 'Shipment delivered successfully',
+    'completed': 'Shipment completed',
+    'dispatched': 'Shipment dispatched',
+    'in_transit': 'Shipment in transit'
+  };
+  return descMap[status] || `Status updated to ${status}`;
+}
 
 // ========== 10. ADD SHIPMENTS TO EXISTING CONSOLIDATION ==========
 exports.addShipmentsToConsolidation = async (req, res) => {
@@ -2132,4 +2128,166 @@ exports.updateShipmentInConsolidation = async (req, res) => {
     });
   }
 };
+// controllers/shipmentController.js - trackByNumber ফাংশন
+
+exports.trackByNumber = async (req, res) => {
+    try {
+        const { trackingNumber } = req.params;
+
+        const shipment = await Shipment.findOne({ trackingNumber })
+            .populate('customerId', 'companyName firstName lastName')
+            .select('trackingNumber status milestones trackingUpdates currentMilestone transport packages shipmentDetails actualDeliveryDate sender receiver estimatedDepartureDate estimatedArrivalDate');
+
+        if (!shipment) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Shipment not found' 
+            });
+        }
+
+        console.log('📊 Tracking Data:', {
+            trackingNumber: shipment.trackingNumber,
+            status: shipment.status,
+            milestonesCount: shipment.milestones?.length
+        });
+
+        // ✅ সব মাইলস্টোন সাজান (তারিখ অনুযায়ী)
+        const sortedMilestones = [...(shipment.milestones || [])]
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // ✅ ডেস্টিনেশন নির্ধারণ
+        const destination = shipment.shipmentDetails?.destination || 
+                           shipment.receiver?.address?.country || 
+                           'UK';
+
+        // ✅ টাইমলাইন তৈরি
+        const timeline = sortedMilestones.map(m => {
+            let location = m.location;
+            let statusLabel = getStatusDisplayText(m.status);
+            
+            // লোকেশন ফরম্যাটিং
+            if (m.status === 'arrived_at_destination_port') {
+                location = destination;
+            } else if (m.status === 'customs_cleared') {
+                location = destination;
+            } else if (m.status === 'out_for_delivery') {
+                location = destination;
+            } else if (m.status === 'delivered' || m.status === 'completed') {
+                location = destination;
+            }
+            
+            return {
+                status: m.status,
+                statusLabel: statusLabel,
+                location: location,
+                description: m.description,
+                timestamp: m.timestamp,
+                formattedDate: m.timestamp ? new Date(m.timestamp).toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : null
+            };
+        });
+
+        // ✅ বর্তমান স্ট্যাটাস এবং লোকেশন
+        let currentLocation = 'Processing';
+        let currentStatus = shipment.status;
+        
+        if (timeline.length > 0) {
+            const latest = timeline[timeline.length - 1];
+            currentLocation = latest.location || 'In Transit';
+            currentStatus = latest.status;
+        }
+
+        // ✅ প্রগ্রেস ক্যালকুলেশন
+        const progress = calculateShipmentProgress(shipment.status, sortedMilestones);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                trackingNumber: shipment.trackingNumber,
+                status: currentStatus,
+                statusLabel: getStatusDisplayText(currentStatus),
+                currentLocation: currentLocation,
+                origin: shipment.shipmentDetails?.origin || 'China Warehouse',
+                destination: destination,
+                estimatedDeparture: shipment.estimatedDepartureDate,
+                estimatedArrival: shipment.transport?.estimatedArrival || shipment.estimatedArrivalDate,
+                actualDelivery: shipment.actualDeliveryDate,
+                progress: progress,
+                timeline: timeline,
+                lastUpdate: shipment.updatedAt,
+                sender: {
+                    name: shipment.sender?.name,
+                    country: shipment.sender?.address?.country
+                },
+                receiver: {
+                    name: shipment.receiver?.name,
+                    country: shipment.receiver?.address?.country
+                },
+                packages: (shipment.packages || []).map(pkg => ({
+                    description: pkg.description,
+                    quantity: pkg.quantity,
+                    weight: pkg.weight,
+                    volume: pkg.volume
+                }))
+            }
+        });
+
+    } catch (error) {
+        console.error('Track by number error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ✅ হেল্পার ফাংশন
+function getStatusDisplayText(status) {
+    const labels = {
+        'pending': 'Pending',
+        'in_progress': 'In Progress',
+        'consolidated': 'Consolidated',
+        'ready_for_dispatch': 'Ready for Dispatch',
+        'loaded_in_container': 'Loaded in Container',
+        'dispatched': 'Dispatched',
+        'in_transit': 'In Transit',
+        'arrived_at_destination_port': 'Arrived at Port',
+        'customs_cleared': 'Customs Cleared',
+        'out_for_delivery': 'Out for Delivery',
+        'delivered': 'Delivered',
+        'completed': 'Completed',
+        'cancelled': 'Cancelled',
+        'on_hold': 'On Hold'
+    };
+    return labels[status] || status?.replace(/_/g, ' ') || 'Processing';
+}
+
+function calculateShipmentProgress(status, milestones) {
+    const progressMap = {
+        'pending': 10,
+        'consolidated': 30,
+        'ready_for_dispatch': 35,
+        'loaded_in_container': 40,
+        'dispatched': 45,
+        'in_transit': 50,
+        'arrived_at_destination_port': 70,
+        'customs_cleared': 80,
+        'out_for_delivery': 90,
+        'delivered': 100,
+        'completed': 100
+    };
+    
+    // মাইলস্টোন থেকে সর্বোচ্চ প্রগ্রেস নিন
+    let maxProgress = 0;
+    for (const m of milestones) {
+        const progress = progressMap[m.status] || 0;
+        if (progress > maxProgress) {
+            maxProgress = progress;
+        }
+    }
+    
+    return maxProgress > 0 ? maxProgress : (progressMap[status] || 0);
+}
 module.exports = exports;

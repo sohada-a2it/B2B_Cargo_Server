@@ -150,12 +150,9 @@ const templates = {
                             <li>You'll receive a price quote via email</li>
                             <li>Review and accept the quote to confirm your booking</li>
                         </ul>
+                         
                         
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${data.dashboardUrl}" class="button">📊 Track Booking Status</a>
-                        </div>
-                        
-                        <p>For any questions, please contact our support team at <a href="mailto:${data.supportEmail}">${data.supportEmail}</a></p>
+                        <p>For any questions, please contact our support team </p>
                     </div>
                 </div>
             </body>
@@ -234,11 +231,7 @@ const templates = {
                             <p><strong>Valid Until:</strong> ${formatDate(data.validUntil)}</p>
                             ${data.notes ? `<p><strong>Notes:</strong> ${data.notes}</p>` : ''}
                         </div>
-                        
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${data.acceptUrl}" class="button-accept">✅ Accept Quote</a>
-                            <a href="${data.rejectUrl}" class="button-reject">❌ Reject Quote</a>
-                        </div>
+                         
                         
                         <p><strong>Please note:</strong> The quote will expire on ${formatDate(data.validUntil)}. Make sure to respond before then.</p>
                     </div>
@@ -374,11 +367,7 @@ const templates = {
                         <p><strong>Total Amount:</strong> ${formatCurrency(data.quotedAmount, data.currency)}</p>
                         <p><strong>Invoice Number:</strong> ${data.invoiceNumber || 'Processing'}</p>
                         
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${data.trackingUrl}" class="button button-info">🔍 Track Shipment</a>
-                            <a href="${data.invoiceUrl}" class="button button-secondary">💰 View Invoice</a>
-                            <a href="${data.dashboardUrl}" class="button button-primary">📊 Dashboard</a>
-                        </div>
+ 
                         
                         <p><strong>What's Next?</strong> Your shipment is being prepared. You'll receive updates at every stage of the journey.</p>
                     </div>
@@ -418,12 +407,7 @@ const templates = {
                         <p><strong>Origin:</strong> ${data.origin}</p>
                         <p><strong>Destination:</strong> ${data.destination}</p>
                         
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${data.shipmentUrl}" style="background: #17a2b8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 5px;">📦 Manage Shipment</a>
-                            <a href="${data.invoiceUrl}" style="background: #ffc107; color: #333; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 5px;">💰 View Invoice</a>
-                        </div>
-                        
-                        <p><strong>Action Required:</strong> Please assign this to operations team for processing.</p>
+  
                     </div>
                 </div>
             </body>
@@ -748,15 +732,7 @@ const templates = {
                             </div>
                             <div class="tracking-number">
                                 ${data.trackingNumber}
-                            </div>
-                            <div>
-                                <a href="${data.trackingUrl}" class="tracking-button">
-                                    🔍 Track Your Shipment
-                                </a>
-                            </div>
-                            <p style="font-size: 13px; color: #64748b; margin-top: 10px;">
-                                Click above to see real-time updates
-                            </p>
+                            </div> 
                         </div>
 
                         <!-- Shipment Information -->
@@ -831,42 +807,7 @@ const templates = {
                             Delivery times are estimates and may vary based on customs clearance and local conditions.
                         </div>
 
-                        <!-- What to Expect -->
-                        <div style="margin: 25px 0;">
-                            <h4 style="color: #2563eb; margin-bottom: 15px;">⏳ What to Expect</h4>
-                            <ul style="list-style: none; padding: 0;">
-                                <li style="margin-bottom: 10px; display: flex; align-items: center;">
-                                    <span style="background: #2563eb; color: white; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px;">1</span>
-                                    <span>Shipment processing at origin warehouse</span>
-                                </li>
-                                <li style="margin-bottom: 10px; display: flex; align-items: center;">
-                                    <span style="background: #2563eb; color: white; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px;">2</span>
-                                    <span>In transit to destination country</span>
-                                </li>
-                                <li style="margin-bottom: 10px; display: flex; align-items: center;">
-                                    <span style="background: #2563eb; color: white; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px;">3</span>
-                                    <span>Customs clearance (if applicable)</span>
-                                </li>
-                                <li style="margin-bottom: 10px; display: flex; align-items: center;">
-                                    <span style="background: #2563eb; color: white; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px;">4</span>
-                                    <span>Out for delivery to your address</span>
-                                </li>
-                            </ul>
-                        </div>
-
-                        <div class="divider"></div>
-
-                        <!-- Need Help -->
-                        <div style="text-align: center;">
-                            <p style="color: #475569;">
-                                <strong>Need assistance?</strong><br>
-                                Contact our support team at 
-                                <a href="mailto:${data.supportEmail}" style="color: #2563eb; text-decoration: none;">
-                                    ${data.supportEmail}
-                                </a>
-                            </p>
-                        </div>
-                    </div>
+ 
 
                     <!-- Footer -->
                     <div class="footer">
@@ -1013,7 +954,9 @@ const templates = {
 };
 
 // Send email function with retry logic
-const sendEmail = async ({ to, subject, template, data }, retries = 3) => {
+// utils/emailService.js - sendEmail function replace করুন
+
+const sendEmail = async ({ to, subject, template, data, attachments }, retries = 3) => {
     try {
         // Validate inputs
         if (!to || !template) {
@@ -1028,14 +971,23 @@ const sendEmail = async ({ to, subject, template, data }, retries = 3) => {
         
         const emailContent = templateFn(data);
         
-        // Prepare email options
+        // Prepare email options with attachments support
         const mailOptions = {
             from: `"${process.env.EMAIL_FROM_NAME || 'B2B Logistics'}" <${process.env.EMAIL_FROM || 'noreply@b2blogistics.com'}>`,
             to: Array.isArray(to) ? to.join(', ') : to,
             replyTo: process.env.EMAIL_REPLY_TO || process.env.EMAIL_FROM,
             subject: emailContent.subject || subject,
-            html: emailContent.html
+            html: emailContent.html,
+            attachments: attachments || []  // ✅ এই লাইনটি গুরুত্বপূর্ণ
         };
+        
+        // Log attachment info
+        if (attachments && attachments.length > 0) {
+            console.log(`📎 Sending email with ${attachments.length} attachment(s):`);
+            attachments.forEach(att => {
+                console.log(`   - ${att.filename} (${att.content?.length || 0} bytes)`);
+            });
+        }
         
         // Send email with retry logic
         let lastError;
@@ -1046,6 +998,7 @@ const sendEmail = async ({ to, subject, template, data }, retries = 3) => {
                     template,
                     to: Array.isArray(to) ? to.length + ' recipients' : to,
                     messageId: info.messageId,
+                    attachments: attachments?.length || 0,
                     attempt: i + 1
                 });
                 return {
@@ -1058,7 +1011,7 @@ const sendEmail = async ({ to, subject, template, data }, retries = 3) => {
                 lastError = err;
                 console.log(`⚠️ Email send attempt ${i + 1} failed:`, err.message);
                 if (i < retries - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
                 }
             }
         }
@@ -1069,11 +1022,9 @@ const sendEmail = async ({ to, subject, template, data }, retries = 3) => {
         console.error('❌ Email send error:', {
             template,
             to: Array.isArray(to) ? to.length + ' recipients' : to,
+            attachments: attachments?.length || 0,
             error: error.message
         });
-        
-        // Log to database or monitoring service in production
-        // await logEmailError({ to, template, error: error.message });
         
         return {
             success: false,

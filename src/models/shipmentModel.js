@@ -1,4 +1,4 @@
-// models/shipmentModel.js - Booking Model-এর সাথে সামঞ্জস্যপূর্ণ ভার্সন
+// models/shipmentModel.js - সম্পূর্ণ আপডেটেড ভার্সন (Return Request সহ)
 
 const mongoose = require('mongoose');
 
@@ -18,31 +18,30 @@ const shipmentSubTypes = [
     'door_to_door'          // Door to Door
 ];
 
-// Shipment Status (Booking-এর shipmentStatuses থেকে)
-// models/shipmentModel.js - status enum আপডেট করুন
-
+// Shipment Status
 const shipmentStatuses = [
     'pending',
     'in_progress', 
     'picked_up_from_warehouse',
     'departed_port_of_origin',
     'in_transit_sea_freight',
-    'in_transit',              // ✅ যোগ করুন (in_transit_sea_freight এর পাশাপাশি)
+    'in_transit',
     'arrived_at_destination_port',
     'customs_cleared',
     'out_for_delivery',
     'inspected',                   
     'damage_reported',
-    'consolidating',        // ← নতুন 
-    'consolidated',           // ✅ যোগ করুন
-    'ready_for_dispatch',       // ✅ যোগ করুন
-    'loaded_in_container',      // ✅ যোগ করুন
-    'dispatched',               // ✅ যোগ করুন
-    'completed',                // ✅ যোগ করুন
+    'consolidating',
+    'consolidated',
+    'ready_for_dispatch',
+    'loaded_in_container',
+    'dispatched',
+    'completed',
     'delivered',
     'on_hold',
     'cancelled',
     'returned',
+    'return_initiated',        // ✅ নতুন (return started)
     'received_at_warehouse'
 ];
 
@@ -50,7 +49,7 @@ const shipmentStatuses = [
 const shippingModes = ['DDP', 'DDU', 'FOB', 'CIF'];
 
 // Currencies - Booking-এর সাথে মিল রেখে
-const currencies = ['USD', 'GBP', 'CAD' ];
+const currencies = ['USD', 'GBP', 'CAD'];
 
 // Courier Service Types - Booking-এর সাথে মিল রেখে
 const courierServiceTypes = ['standard', 'express', 'overnight', 'economy'];
@@ -62,7 +61,6 @@ const origins = ['China Warehouse', 'Thailand Warehouse'];
 const destinations = ['USA', 'UK', 'Canada'];
 
 // ==================== PACKAGE SCHEMA ====================
-// Booking-এর packageItemSchema-এর সাথে মিল রেখে
 const packageSchema = new mongoose.Schema({
     description: {
         type: String,
@@ -70,7 +68,7 @@ const packageSchema = new mongoose.Schema({
     },
     packagingType: {
         type: String,
-        enum: [          // Booking-এর packagingTypes থেকে
+        enum: [
             'pallet', 'carton', 'crate', 'wooden_box', 'container',
             'envelope', 'loose_cargo', 'loose_tires', '20ft_container', '40ft_container'
         ],
@@ -99,7 +97,7 @@ const packageSchema = new mongoose.Schema({
     },
     productCategory: {
         type: String,
-        enum: [           // Booking-এর productCategory থেকে
+        enum: [
             'Electronics', 'Furniture', 'Clothing', 'Machinery', 
             'Automotive', 'Pharmaceuticals', 'Food', 'Documents', 
             'Tires', 'Chemicals', 'Others'
@@ -154,6 +152,63 @@ const milestoneSchema = new mongoose.Schema({
     }
 });
 
+// ==================== RETURN REQUEST SCHEMA (NEW) ====================
+const returnRequestSchema = new mongoose.Schema({
+    requestedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
+    requestedAt: {
+        type: Date,
+        default: Date.now
+    },
+    status: {
+        type: String,
+        enum: ['none', 'pending', 'approved', 'rejected', 'completed'],
+        default: 'none'
+    },
+    reason: {
+        type: String,
+        required: true,
+        enum: [
+            'damaged_product',
+            'wrong_product',
+            'missing_items',
+            'delayed_delivery',
+            'customer_cancellation',
+            'other'
+        ]
+    },
+    reasonText: String,  // For "other" reason
+    description: String,
+    images: [{
+        url: String,
+        uploadedAt: Date
+    }],
+    approvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    approvedAt: Date,
+    rejectionReason: String,
+    returnTrackingNumber: String,
+    returnNotes: String,
+    refundAmount: {
+        type: Number,
+        default: 0
+    },
+    refundCurrency: {
+        type: String,
+        enum: currencies,
+        default: 'USD'
+    },
+    refundProcessedAt: Date,
+    refundReference: String
+}, {
+    timestamps: true
+});
+
 // ==================== MAIN SHIPMENT SCHEMA ====================
 const shipmentSchema = new mongoose.Schema({
     // ===== Identification =====
@@ -180,7 +235,7 @@ const shipmentSchema = new mongoose.Schema({
         required: true
     },
     
-    // ===== Shipment Classification (Booking থেকে) =====
+    // ===== Shipment Classification =====
     shipmentClassification: {
         mainType: {
             type: String,
@@ -194,7 +249,7 @@ const shipmentSchema = new mongoose.Schema({
         }
     },
     
-    // ===== Shipment Details (Booking থেকে) =====
+    // ===== Shipment Details =====
     shipmentDetails: {
         origin: {
             type: String,
@@ -225,10 +280,10 @@ const shipmentSchema = new mongoose.Schema({
         }
     },
     
-    // ===== Packages (Booking থেকে) =====
+    // ===== Packages =====
     packages: [packageSchema],
     
-    // ===== Sender Information (Booking থেকে) =====
+    // ===== Sender Information =====
     sender: {
         name: String,
         companyName: String,
@@ -244,7 +299,7 @@ const shipmentSchema = new mongoose.Schema({
         }
     },
     
-    // ===== Receiver Information (Booking থেকে) =====
+    // ===== Receiver Information =====
     receiver: {
         name: String,
         companyName: String,
@@ -261,7 +316,7 @@ const shipmentSchema = new mongoose.Schema({
         isResidential: Boolean
     },
     
-    // ===== Courier Information (Booking থেকে) =====
+    // ===== Courier Information =====
     courier: {
         company: {
             type: String,
@@ -298,7 +353,7 @@ const shipmentSchema = new mongoose.Schema({
     // ===== Milestones =====
     milestones: [milestoneSchema],
     
-    // ===== Container Information (Booking থেকে) =====
+    // ===== Container Information =====
     containerInfo: {
         containerNumber: String,
         containerType: {
@@ -309,7 +364,7 @@ const shipmentSchema = new mongoose.Schema({
         stuffedAt: Date
     },
     
-    // ===== Transport Details (Booking থেকে) =====
+    // ===== Transport Details =====
     transport: {
         carrierName: String,
         vesselName: String,
@@ -340,7 +395,7 @@ const shipmentSchema = new mongoose.Schema({
         notes: String
     },
     
-    // ===== Dates (Booking থেকে) =====
+    // ===== Dates =====
     dates: {
         estimatedDeparture: Date,
         estimatedArrival: Date,
@@ -357,6 +412,12 @@ const shipmentSchema = new mongoose.Schema({
     consolidationId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Consolidation'
+    },
+    
+    // ===== Return Request (NEW) =====
+    returnRequest: {
+        type: returnRequestSchema,
+        default: () => ({ status: 'none' })
     },
     
     // ===== Notes =====
@@ -465,7 +526,6 @@ shipmentSchema.methods.addMilestone = function(status, location, description, us
     this.status = status;
     this.currentMilestone = status;
     
-    // Update transport current location if location provided
     if (location) {
         if (!this.transport) this.transport = {};
         this.transport.currentLocation = {
@@ -503,6 +563,99 @@ shipmentSchema.methods.updateDeliveryStatus = function(status, location, userId)
     }
 };
 
+// ==================== RETURN REQUEST METHODS (NEW) ====================
+shipmentSchema.methods.canRequestReturn = function() {
+    // Check if shipment is delivered or completed
+    const eligibleStatuses = ['delivered', 'completed'];
+    if (!eligibleStatuses.includes(this.status)) {
+        return { allowed: false, reason: `Shipment status is ${this.status}. Only delivered/completed shipments can be returned.` };
+    }
+    
+    // Check if return already requested
+    if (this.returnRequest && this.returnRequest.status !== 'none' && this.returnRequest.status !== 'rejected') {
+        return { allowed: false, reason: `Return already ${this.returnRequest.status}.` };
+    }
+    
+    // Check delivery date (within 14 days)
+    const deliveryDate = this.dates?.delivered || this.courier?.actualDeliveryDate;
+    if (deliveryDate) {
+        const daysSinceDelivery = Math.floor((Date.now() - new Date(deliveryDate)) / (1000 * 60 * 60 * 24));
+        if (daysSinceDelivery > 14) {
+            return { allowed: false, reason: `Return period expired (${daysSinceDelivery} days ago). Maximum 14 days allowed.` };
+        }
+    }
+    
+    return { allowed: true };
+};
+
+shipmentSchema.methods.requestReturn = function(userId, returnData) {
+    this.returnRequest = {
+        requestedBy: userId,
+        requestedAt: new Date(),
+        status: 'pending',
+        reason: returnData.reason,
+        reasonText: returnData.reasonText,
+        description: returnData.description,
+        images: returnData.images || []
+    };
+    
+    this.addMilestone(
+        'return_requested',
+        this.shipmentDetails?.destination || 'Customer Location',
+        `Return requested. Reason: ${returnData.reason}${returnData.reasonText ? ' - ' + returnData.reasonText : ''}`,
+        userId
+    );
+};
+
+shipmentSchema.methods.approveReturn = function(userId, approvalData) {
+    this.returnRequest.status = 'approved';
+    this.returnRequest.approvedBy = userId;
+    this.returnRequest.approvedAt = new Date();
+    this.returnRequest.returnTrackingNumber = approvalData.returnTrackingNumber;
+    this.returnRequest.returnNotes = approvalData.notes;
+    
+    this.status = 'return_initiated';
+    
+    this.addMilestone(
+        'return_approved',
+        'System',
+        `Return approved. Return tracking: ${approvalData.returnTrackingNumber || 'To be provided'}. ${approvalData.notes || ''}`,
+        userId
+    );
+};
+
+shipmentSchema.methods.rejectReturn = function(userId, rejectionReason) {
+    this.returnRequest.status = 'rejected';
+    this.returnRequest.rejectionReason = rejectionReason;
+    this.returnRequest.approvedBy = userId;
+    this.returnRequest.approvedAt = new Date();
+    
+    this.addMilestone(
+        'return_rejected',
+        'System',
+        `Return rejected. Reason: ${rejectionReason}`,
+        userId
+    );
+};
+
+shipmentSchema.methods.completeReturn = function(userId, completeData) {
+    this.returnRequest.status = 'completed';
+    this.returnRequest.returnNotes = completeData.notes;
+    this.returnRequest.refundAmount = completeData.refundAmount;
+    this.returnRequest.refundCurrency = completeData.refundCurrency;
+    this.returnRequest.refundProcessedAt = new Date();
+    this.returnRequest.refundReference = completeData.refundReference;
+    
+    this.status = 'returned';
+    
+    this.addMilestone(
+        'return_completed',
+        'System',
+        `Return completed. Refund: ${completeData.refundAmount || 0} ${completeData.refundCurrency || 'USD'}. ${completeData.notes || ''}`,
+        userId
+    );
+};
+
 // ==================== INDEXES ====================
 shipmentSchema.index({ shipmentNumber: 1 });
 shipmentSchema.index({ trackingNumber: 1 });
@@ -511,5 +664,7 @@ shipmentSchema.index({ customerId: 1, status: 1 });
 shipmentSchema.index({ 'shipmentDetails.origin': 1, 'shipmentDetails.destination': 1 });
 shipmentSchema.index({ 'containerInfo.containerNumber': 1 });
 shipmentSchema.index({ status: 1, createdAt: -1 });
+shipmentSchema.index({ 'returnRequest.status': 1 });  // ✅ নতুন index
+shipmentSchema.index({ 'returnRequest.requestedAt': -1 });  // ✅ নতুন index
 
 module.exports = mongoose.model('Shipment', shipmentSchema);

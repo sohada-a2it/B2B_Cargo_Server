@@ -205,7 +205,17 @@ router.patch('/:id/warehouse/process',protect,  adminOnly, shipmentController.pr
 
 // ========== NOTES ROUTES ==========
 router.post('/my-shipment/:id/notes/customer', protect, shipmentController.addCustomerNote); // customer notes (customer+admin)
+// ========== RETURN REQUEST ROUTES ==========
 
+// Customer routes
+router.post('/shipments/:id/return-request', protect, shipmentController.requestReturn);
+router.get('/shipments/:id/return-status', protect, shipmentController.getReturnRequestStatus);
+
+// Admin routes
+router.get('/return-requests', protect, adminOnly, shipmentController.getAllReturnRequests);
+router.put('/return-requests/:id/approve', protect, adminOnly, shipmentController.approveReturnRequest);
+router.put('/return-requests/:id/reject', protect, adminOnly, shipmentController.rejectReturnRequest);
+router.put('/return-requests/:id/complete', protect, adminOnly, shipmentController.completeReturn);
 // ========== WAREHOUSE MANAGEMENT ==========
 
 // Get all warehouses (admin only)
