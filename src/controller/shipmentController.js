@@ -1557,6 +1557,7 @@ const generateSerialTrackingNumber = async () => {
 };
 // controllers/shipmentController.js - নতুন ফাংশন যোগ করুন
 
+// ========== UPDATE SHIPMENT TRACKING NUMBER (Booking-ও আপডেট হবে) ==========
 exports.updateShipmentTrackingNumber = async (req, res) => {
     try {
         const { id } = req.params;
@@ -1569,11 +1570,15 @@ exports.updateShipmentTrackingNumber = async (req, res) => {
             });
         }
 
+        console.log('📦 Updating tracking number for shipment:', id);
+        console.log('🔢 New tracking number:', trackingNumber);
+
+        // 1️⃣ Shipment আপডেট করুন
         const shipment = await Shipment.findByIdAndUpdate(
             id,
             { 
                 trackingNumber: trackingNumber,
-                updatedBy: req.user._id 
+                updatedBy: req.user?._id 
             },
             { new: true }
         );
@@ -1585,14 +1590,78 @@ exports.updateShipmentTrackingNumber = async (req, res) => {
             });
         }
 
+        console.log('✅ Shipment updated:', shipment.shipmentNumber);
+
+        // 2️⃣ 🔴 Booking-ও আপডেট করুন (এটাই missing ছিল)
+        let bookingUpdated = false;
+        
+        // উপায় 1: shipment.bookingId দিয়ে
+        if (shipment.bookingId) {
+            const booking = await Booking.findByIdAndUpdate(
+                shipment.bookingId,
+                { 
+                    trackingNumber: trackingNumber,
+                    'shipmentDetails.trackingNumber': trackingNumber 
+                },
+                { new: true }
+            );
+            if (booking) {
+                bookingUpdated = true;
+                console.log('✅ Booking updated via bookingId:', booking.bookingNumber);
+            }
+        }
+        
+        // উপায় 2: bookingNumber দিয়ে (যদি উপায় 1 কাজ না করে)
+        if (!bookingUpdated && shipment.bookingNumber) {
+            const booking = await Booking.findOneAndUpdate(
+                { bookingNumber: shipment.bookingNumber },
+                { 
+                    trackingNumber: trackingNumber,
+                    'shipmentDetails.trackingNumber': trackingNumber 
+                },
+                { new: true }
+            );
+            if (booking) {
+                bookingUpdated = true;
+                console.log('✅ Booking updated via bookingNumber:', booking.bookingNumber);
+            }
+        }
+        
+        // উপায় 3: shipmentNumber দিয়ে (যদি উপায় 1-2 কাজ না করে)
+        if (!bookingUpdated && shipment.shipmentNumber) {
+            const booking = await Booking.findOneAndUpdate(
+                { 'shipmentDetails.shipmentNumber': shipment.shipmentNumber },
+                { 
+                    trackingNumber: trackingNumber,
+                    'shipmentDetails.trackingNumber': trackingNumber 
+                },
+                { new: true }
+            );
+            if (booking) {
+                bookingUpdated = true;
+                console.log('✅ Booking updated via shipmentNumber:', booking.bookingNumber);
+            }
+        }
+
+        if (!bookingUpdated) {
+            console.log('⚠️ Warning: No booking found to update tracking number');
+        }
+
         res.status(200).json({
             success: true,
-            message: 'Tracking number updated successfully',
-            data: shipment
+            message: '✅ Tracking number updated successfully in both Shipment and Booking',
+            data: {
+                shipment: shipment,
+                bookingUpdated: bookingUpdated
+            }
         });
 
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        console.error('❌ Update tracking error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
 };
 // new

@@ -36,11 +36,17 @@ const shipmentStatuses = [
     'ready_for_dispatch',
     'loaded_in_container',
     'dispatched',
-    'completed',
+    'completed', 
     'delivered',
     'on_hold',
+    'shipment_on_hold', 
     'cancelled',
     'returned',
+    'return_initiated',
+    'return_requested',        // ✅ যোগ করুন
+    'return_approved',         // ✅ যোগ করুন
+    'return_rejected',         // ✅ যোগ করুন
+    'return_completed', 
     'return_initiated',        // ✅ নতুন (return started)
     'received_at_warehouse'
 ];
@@ -153,11 +159,13 @@ const milestoneSchema = new mongoose.Schema({
 });
 
 // ==================== RETURN REQUEST SCHEMA (NEW) ====================
+// models/shipmentModel.js - returnRequestSchema সম্পূর্ণভাবে replace করুন
+
 const returnRequestSchema = new mongoose.Schema({
     requestedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false
     },
     requestedAt: {
         type: Date,
@@ -165,12 +173,11 @@ const returnRequestSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['none', 'pending', 'approved', 'rejected', 'completed'],
+        enum: ['none', 'pending', 'approved', 'rejected', 'completed', 'customer_confirmed', 'rejected_by_admin', 'rejected_by_customer'],
         default: 'none'
     },
     reason: {
         type: String,
-        required: true,
         enum: [
             'damaged_product',
             'wrong_product',
@@ -180,12 +187,15 @@ const returnRequestSchema = new mongoose.Schema({
             'other'
         ]
     },
-    reasonText: String,  // For "other" reason
+    reasonText: String,
     description: String,
+    items: [{ type: Number }],
     images: [{
         url: String,
         uploadedAt: Date
     }],
+    
+    // Admin approval fields
     approvedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
@@ -194,20 +204,37 @@ const returnRequestSchema = new mongoose.Schema({
     rejectionReason: String,
     returnTrackingNumber: String,
     returnNotes: String,
-    refundAmount: {
-        type: Number,
-        default: 0
+    
+    // Customer confirmation fields
+    customerConfirmedAt: Date,
+    customerRejectedAt: Date,
+    customerRejectionReason: String,
+    customerNotes: String,
+    
+    // Return cost fields
+    returnCost: { type: Number, default: 0 },
+    returnCostCurrency: { type: String, default: 'USD' },
+    returnCostBreakdown: {
+        shippingCost: Number,
+        handlingFee: Number,
+        restockingFee: Number,
+        total: Number,
+        note: String
     },
-    refundCurrency: {
-        type: String,
-        enum: currencies,
-        default: 'USD'
-    },
+    isFreeReturn: { type: Boolean, default: false },
+    costAccepted: { type: Boolean, default: false },
+    returnCostAdjustedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    returnCostAdjustedAt: Date,
+    returnCostAdjustmentReason: String,
+    
+    // Completion fields
+    completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    completedAt: Date,
+    refundAmount: { type: Number, default: 0 },
+    refundCurrency: { type: String, enum: currencies, default: 'USD' },
     refundProcessedAt: Date,
     refundReference: String
-}, {
-    timestamps: true
-});
+}, { timestamps: true });
 
 // ==================== MAIN SHIPMENT SCHEMA ====================
 const shipmentSchema = new mongoose.Schema({

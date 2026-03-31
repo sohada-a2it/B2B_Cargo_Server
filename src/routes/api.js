@@ -4,6 +4,7 @@ const userController = require("../controller/userController");
 const { protect, adminOnly } = require("../middleware/AuthVerifyMiddleWare"); 
 const bookingController = require('../controller/bookingController');
 const shipmentController = require('../controller/shipmentController');
+const returnController = require('../controller/returnController');
 const warehouseController = require('../controller/warehouseController');
 const consolidationController = require('../controller/consolidationController');
 const trackingController = require('../controller/trackingController');
@@ -116,8 +117,7 @@ router.get(
 
 router.get(
     '/getInvoiceById/:id', 
-    protect, 
-    adminOnly, 
+    protect,  
     bookingController.getInvoiceById
 );
 
@@ -151,8 +151,7 @@ router.post(
 
 router.post(
     '/invoices/:id/generate-pdf', 
-    protect, 
-    adminOnly, 
+    protect,  
     bookingController.generateInvoicePDF
 );
 
@@ -207,15 +206,17 @@ router.patch('/:id/warehouse/process',protect,  adminOnly, shipmentController.pr
 router.post('/my-shipment/:id/notes/customer', protect, shipmentController.addCustomerNote); // customer notes (customer+admin)
 // ========== RETURN REQUEST ROUTES ==========
 
-// Customer routes
-router.post('/shipments/:id/return-request', protect, shipmentController.requestReturn);
-router.get('/shipments/:id/return-status', protect, shipmentController.getReturnRequestStatus);
+// ==================== CUSTOMER ROUTES ====================
+router.post('/shipments/:id/return-request', protect, returnController.requestReturn);
+router.get('/shipments/:id/return-status', protect, returnController.getReturnRequestStatus);
+router.put('/shipments/:id/return-confirm', protect, returnController.customerConfirmReturn);
+router.put('/shipments/:id/return-reject-customer', protect, returnController.customerRejectReturn);
 
-// Admin routes
-router.get('/return-requests', protect, adminOnly, shipmentController.getAllReturnRequests);
-router.put('/return-requests/:id/approve', protect, adminOnly, shipmentController.approveReturnRequest);
-router.put('/return-requests/:id/reject', protect, adminOnly, shipmentController.rejectReturnRequest);
-router.put('/return-requests/:id/complete', protect, adminOnly, shipmentController.completeReturn);
+// ==================== ADMIN ROUTES ====================
+router.get('/admin/return-requests', protect, adminOnly, returnController.getAllReturnRequests);
+router.get('/admin/return-requests/stats', protect, adminOnly, returnController.getReturnStats);
+router.put('/admin/return-requests/:id/approve', protect, adminOnly, returnController.approveReturnRequest);
+router.put('/admin/return-requests/:id/reject', protect, adminOnly, returnController.rejectReturnRequest);
 // ========== WAREHOUSE MANAGEMENT ==========
 
 // Get all warehouses (admin only)
@@ -274,7 +275,7 @@ router.put(
 
 // ========== CONSOLIDATION ==========
 // Update individual shipment inside consolidation
-router.patch('/:consolidationId/shipments/:shipmentId', protect,  adminOnly, 
+router.patch('/consolidations/:consolidationId/shipments/:shipmentId', protect,  adminOnly, 
   consolidationController.updateShipmentInConsolidation
 );
 
