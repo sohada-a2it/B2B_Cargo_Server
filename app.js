@@ -14,11 +14,11 @@ app.use(express.urlencoded({ extended: true }));
 
 // CORS configuration for frontend
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:8000'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization','Cache-Control',  // ← ADD THIS
-        'Pragma' ]
+  origin: ['*', 'http://localhost:3000', 'http://localhost:3001', 'http://localhost:8000','https://b2b-cargo-server-1.onrender.com','https://admin.cargologisticscompany.com/','https://client.cargologisticscompany.com/'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control',  // ← ADD THIS
+    'Pragma']
 }));
 
 // Logging middleware
@@ -70,9 +70,9 @@ app.get('/health', (req, res) => {
 
 // ===================== 404 HANDLER =====================
 app.use("*", (req, res) => {
-  res.status(404).json({ 
+  res.status(404).json({
     success: false,
-    message: `Route ${req.originalUrl} not found` 
+    message: `Route ${req.originalUrl} not found`
   });
 });
 
