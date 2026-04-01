@@ -13,13 +13,27 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // CORS configuration for frontend
-app.use(cors({
-  origin: ['*', 'http://localhost:3000', 'http://localhost:3001', 'http://localhost:8000','https://b2b-cargo-server-1.onrender.com','https://admin.cargologisticscompany.com/','https://client.cargologisticscompany.com/'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control',  // ← ADD THIS
-    'Pragma']
-}));
+// Just add this CORS middleware in your app.js (before routes)
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
 
 // Logging middleware
 app.use((req, res, next) => {
