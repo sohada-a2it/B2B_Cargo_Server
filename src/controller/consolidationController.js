@@ -1245,11 +1245,18 @@ exports.addShipmentsToConsolidation = async (req, res) => {
 };
 
 // ========== 11. REMOVE SHIPMENT FROM CONSOLIDATION ==========
+// controllers/consolidationController.js
+
+// Remove shipment from consolidation (delete shipment from container)
 exports.removeShipmentFromConsolidation = async (req, res) => {
     try {
-        const { id, shipmentId } = req.params;
+        const { consolidationId, shipmentId } = req.params;
 
-        const consolidation = await Consolidation.findById(id);
+        console.log('🗑️ Removing shipment from consolidation:', { consolidationId, shipmentId });
+
+        // Find consolidation
+        const consolidation = await Consolidation.findById(consolidationId);
+        
         if (!consolidation) {
             return res.status(404).json({
                 success: false,
@@ -1257,16 +1264,11 @@ exports.removeShipmentFromConsolidation = async (req, res) => {
             });
         }
 
-        // Check if removal is allowed
-        if (consolidation.status !== 'draft' && consolidation.status !== 'in_progress') {
-            return res.status(400).json({
-                success: false,
-                message: `Cannot remove shipments from consolidation with status: ${consolidation.status}`
-            });
-        }
+        // Check if shipment exists in consolidation
+        const shipmentIndex = consolidation.shipments.findIndex(
+            s => s.toString() === shipmentId
+        );
 
-        // Find the shipment in consolidation
-        const shipmentIndex = consolidation.shipments.indexOf(shipmentId);
         if (shipmentIndex === -1) {
             return res.status(404).json({
                 success: false,
@@ -1274,65 +1276,79 @@ exports.removeShipmentFromConsolidation = async (req, res) => {
             });
         }
 
-        // Get shipment details from queue
-        const queueItem = await ConsolidationQueue.findOne({
-            shipmentId: shipmentId,
-            consolidationId: consolidation._id
-        });
+        // Remove shipment from consolidation
+        const removedShipment = consolidation.shipments.splice(shipmentIndex, 1)[0];
 
-        // Remove from shipments array
-        consolidation.shipments.splice(shipmentIndex, 1);
-        
-        // Remove from items array
-        consolidation.items = consolidation.items.filter(
-            item => item.shipmentId.toString() !== shipmentId
-        );
-
-        // Recalculate totals if we have queue item data
-        if (queueItem) {
-            consolidation.totalShipments--;
-            consolidation.totalPackages -= queueItem.totalPackages || 0;
-            consolidation.totalWeight -= queueItem.totalWeight || 0;
-            consolidation.totalVolume -= queueItem.totalVolume || 0;
-        }
-
-        consolidation.updatedBy = req.user._id;
-        await consolidation.save();
-
-        // Update queue item back to pending
-        if (queueItem) {
-            queueItem.status = 'pending';
-            queueItem.consolidationId = null;
-            queueItem.assignedAt = null;
-            await queueItem.save();
-        }
-
-        // Update shipment
-        await Shipment.findByIdAndUpdate(shipmentId, {
-            $set: {
-                warehouseStatus: 'in_queue',
-                consolidationId: null
-            },
-            $push: {
-                milestones: {
-                    status: 'removed_from_consolidation',
-                    location: consolidation.originWarehouse,
-                    description: `Removed from consolidation ${consolidation.consolidationNumber}`,
-                    timestamp: new Date(),
-                    updatedBy: req.user._id
-                }
+        // Add timeline entry
+        consolidation.timeline.push({
+            status: 'cancelled',
+            timestamp: new Date(),
+            location: consolidation.originWarehouse || 'Warehouse',
+            description: `Shipment ${shipmentId} removed from consolidation (cancelled)`,
+            updatedBy: req.user._id,
+            metadata: {
+                shipmentId: shipmentId,
+                action: 'remove',
+                reason: 'cancelled'
             }
         });
 
+        // Update totals
+        // You may want to recalculate totals here
+        consolidation.totalShipments = consolidation.shipments.length;
+        
+        // Recalculate total weight and volume if needed
+        let totalWeight = 0;
+        let totalVolume = 0;
+        let totalPackages = 0;
+        
+        for (const shipId of consolidation.shipments) {
+            const shipment = await Shipment.findById(shipId);
+            if (shipment) {
+                totalWeight += shipment.totalWeight || 0;
+                totalVolume += shipment.totalVolume || 0;
+                totalPackages += shipment.packages?.length || 0;
+            }
+        }
+        
+        consolidation.totalWeight = totalWeight;
+        consolidation.totalVolume = totalVolume;
+        consolidation.totalPackages = totalPackages;
+
+        await consolidation.save();
+
+        // Also update the shipment status
+        const shipment = await Shipment.findById(shipmentId);
+        if (shipment) {
+            shipment.status = 'cancelled';
+            shipment.cancelledAt = new Date();
+            shipment.cancellationReason = 'Cancelled by admin';
+            shipment.consolidationId = null;
+            
+            shipment.milestones = shipment.milestones || [];
+            shipment.milestones.push({
+                status: 'cancelled',
+                location: 'System',
+                description: 'Shipment removed from consolidation and cancelled',
+                timestamp: new Date(),
+                updatedBy: req.user._id
+            });
+            
+            await shipment.save();
+        }
+
         res.status(200).json({
             success: true,
-            message: 'Shipment removed from consolidation',
+            message: 'Shipment removed from consolidation successfully',
             data: consolidation
         });
 
     } catch (error) {
-        console.error('Remove from consolidation error:', error);
-        res.status(500).json({ success: false, message: error.message });
+        console.error('❌ Remove shipment from consolidation error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
 };
 

@@ -303,7 +303,124 @@ exports.getWarehouseReceipts = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+// ========== 18. DELETE WAREHOUSE RECEIPT (Admin Only) ==========
+// controllers/warehouseController.js - deleteWarehouseReceipt ফাংশন আপডেট করুন
 
+exports.deleteWarehouseReceipt = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Check if user is admin
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. Only admin can delete warehouse receipts'
+            });
+        }
+
+        // Find the receipt
+        const receipt = await WarehouseReceipt.findById(id)
+            .populate('shipmentId');
+
+        if (!receipt) {
+            return res.status(404).json({
+                success: false,
+                message: 'Receipt not found'
+            });
+        }
+
+        // Check if receipt is in a state that can be deleted
+        const deletableStatuses = ['received', 'inspected', 'damaged_report', 'pending'];
+        if (!deletableStatuses.includes(receipt.status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot delete receipt with status: ${receipt.status}. Only receipts with status: ${deletableStatuses.join(', ')} can be deleted.`
+            });
+        }
+
+        console.log(`🗑️ Deleting receipt: ${receipt.receiptNumber}`);
+
+        // 1. Delete inventory items for this receipt
+        const inventoryResult = await WarehouseInventory.deleteMany({ receiptId: receipt._id });
+        console.log(`✅ Deleted ${inventoryResult.deletedCount} inventory items`);
+
+        // 2. Remove from consolidation queue
+        const queueResult = await ConsolidationQueue.deleteMany({ receiptId: receipt._id });
+        console.log(`✅ Removed ${queueResult.deletedCount} items from consolidation queue`);
+
+        // 3. Delete damage report if exists
+        const damageResult = await DamageReport.deleteOne({ receiptId: receipt._id });
+        if (damageResult.deletedCount > 0) {
+            console.log(`✅ Deleted damage report`);
+        }
+
+        // 4. Update shipment - remove receipt reference with valid shipment status
+        if (receipt.shipmentId) {
+            const shipment = await Shipment.findById(receipt.shipmentId);
+            if (shipment) {
+                // ✅ Remove receipt references
+                shipment.receiptId = null;
+                shipment.receiptNumber = null;
+                shipment.storageLocation = null;
+                shipment.receivingNotes = null;
+                shipment.receivingCondition = null;
+                
+                // ✅ Set valid shipment status (only use statuses that exist in shipment enum)
+                // Shipment statuses: pending, picked_up_from_warehouse, departed_port_of_origin, 
+                // in_transit_sea_freight, arrived_at_destination_port, customs_cleared, 
+                // out_for_delivery, delivered, on_hold, cancelled, returned
+                const validShipmentStatus = 'pending';
+                shipment.status = validShipmentStatus;
+                
+                // ✅ Add timeline entry with valid status
+                shipment.milestones = shipment.milestones || [];
+                shipment.milestones.push({
+                    status: 'pending',  // Use valid shipment status
+                    location: 'System',
+                    description: `Receipt ${receipt.receiptNumber} deleted by admin. Shipment reset to pending status.`,
+                    timestamp: new Date(),
+                    updatedBy: req.user._id
+                });
+                
+                await shipment.save();
+                console.log(`✅ Updated shipment: ${shipment.trackingNumber} to status: pending`);
+            }
+        }
+
+        // 5. Delete the receipt
+        await WarehouseReceipt.findByIdAndDelete(id);
+
+        res.status(200).json({
+            success: true,
+            message: `Receipt ${receipt.receiptNumber} deleted successfully`,
+            data: {
+                receiptNumber: receipt.receiptNumber,
+                receiptId: receipt._id,
+                shipmentId: receipt.shipmentId?._id,
+                deletedInventory: inventoryResult.deletedCount,
+                removedFromQueue: queueResult.deletedCount,
+                deletedDamageReport: damageResult.deletedCount > 0
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Delete warehouse receipt error:', error);
+        
+        // Handle validation errors specifically
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({
+                success: false,
+                error: 'Validation failed',
+                details: error.errors
+            });
+        }
+        
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+};
 // ========== 4. GET RECEIPT BY ID ==========
 exports.getReceiptById = async (req, res) => {
     try {

@@ -121,7 +121,13 @@ const consolidationSchema = new mongoose.Schema({
             enum: [
                 'draft', 'in_progress', 'consolidated', 'ready_for_dispatch',
                 'loaded', 'dispatched', 'in_transit', 'departed', 'arrived',
-                'customs_cleared', 'out_for_delivery', 'delivered', 'completed'
+                'customs_cleared', 'out_for_delivery', 'delivered', 'completed','cancelled', 'on_hold',                   // ✅ Shipment cancelled
+                'shipment_cancelled',           // ✅ Individual shipment cancelled
+                'shipment_on_hold',             // ✅ Individual shipment on hold
+                'shipment_hold',                // ✅ Alternative hold status
+                'shipment_damaged',             // ✅ Damaged shipment
+                'shipment_returned'  ,
+                'shipment_in_progress' 
             ]
         },
         timestamp: {

@@ -40,6 +40,7 @@ const shipmentStatuses = [
     'delivered',
     'on_hold',
     'shipment_on_hold', 
+    'shipment_cancelled',
     'cancelled',
     'returned',
     'return_initiated',

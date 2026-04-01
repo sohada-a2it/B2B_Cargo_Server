@@ -54,7 +54,7 @@ router.put('/booking/:id/price-quote', protect, adminOnly, bookingController.upd
 // Customer response routes
 router.put('/booking/:id/accept',protect,  bookingController.acceptQuote);
 router.put('/booking/:id/reject',protect, adminOnly, bookingController.rejectQuote);
-router.put('/booking/:id/cancel', bookingController.cancelBooking); 
+router.post('/bookings/:id/cancel', protect, bookingController.cancelBooking); 
 router.get('/my-bookings', protect, bookingController.getMyBookings);
 
 router.get('/my-bookings/summary',protect, bookingController.getMyBookingsSummary);
@@ -129,7 +129,7 @@ router.put(
 );
 
 router.delete(
-    '/deleteInvoice/:id', 
+    '/invoices/:id', 
     protect, 
     adminOnly, 
     bookingController.deleteInvoice
@@ -189,7 +189,7 @@ router.post('/assign-shipment/:id',protect,  adminOnly, shipmentController.assig
 router.post('/update-transport-details/:id',protect,  adminOnly, shipmentController.updateTransportDetails); 
 router.post('/add-document/:id',protect,  adminOnly, shipmentController.addDocument); 
 router.post('/my-shipment/:id/notes/internal',protect,  adminOnly, shipmentController.addInternalNote); 
-router.post('/my-shipment/:id/cancel',protect,  adminOnly, shipmentController.cancelShipment);  
+router.post('/shipments/:id/cancel',protect,  adminOnly, shipmentController.cancelShipment);  
 
 // ========== COSTS ROUTES (Finance/Admin) ==========
 router.post('/my-shipment/:id/costs',protect,  adminOnly, shipmentController.addCost); 
@@ -246,6 +246,8 @@ router.post('/inspect/:receiptId',protect,  adminOnly,warehouseController.inspec
 
 // Get all receipts
 router.get('/receipts',protect,  adminOnly,warehouseController.getWarehouseReceipts);
+// Delete single receipt (Admin only)
+router.delete('/receipts/:id',protect,  adminOnly, warehouseController.deleteWarehouseReceipt);
 
 // Get receipt by ID
 router.get(
@@ -360,8 +362,8 @@ router.put('/consolidations/:id', protect, adminOnly, consolidationController.up
 router.put('/consolidations/:id/mark-ready', protect, adminOnly, consolidationController.markAsReadyForDispatch);
 router.put('/consolidations/:id/status', protect, adminOnly, consolidationController.updateConsolidationStatus);
 router.post('/consolidations/:id/add-shipments', protect, adminOnly, consolidationController.addShipmentsToConsolidation);
-router.delete('/consolidations/:id/shipment/:shipmentId', protect, adminOnly, consolidationController.removeShipmentFromConsolidation);
-router.delete('/consolidations/:id', protect, adminOnly, consolidationController.deleteConsolidation);
+router.delete('/consolidation/:id/shipment/:shipmentId', protect, adminOnly, consolidationController.removeShipmentFromConsolidation);
+router.delete('/consolidation/:id', protect, adminOnly, consolidationController.deleteConsolidation);
 router.post('/consolidations/:id/documents', protect,adminOnly, consolidationController.uploadDocument);
 
 // tracking routes 

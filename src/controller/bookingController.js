@@ -13,104 +13,104 @@ const { generateInvoicePDFBuffer } = require('../service/pdfGenerator');
 // এই ফাংশনগুলো আপনার ফাইলের একদম উপরে, অন্যান্য হেল্পার ফাংশনের পরে যোগ করুন
 
 // লোকেশন ডিটারমাইন ফাংশন
-const getLocationForStatus = (status, originalLocation, shipment) => {
-    // In Transit এর জন্য
-    if (status.includes('transit') || status === 'in_transit' || status === 'in_transit_sea_freight') {
-        if (shipment.consolidationId?.vesselName) {
-            return `In Transit - ${shipment.consolidationId.vesselName}`;
-        }
-        if (shipment.shipmentDetails?.destination) {
-            return `In Transit to ${shipment.shipmentDetails.destination}`;
-        }
-        return 'In Transit to Destination';
-    }
+// const getLocationForStatus = (status, originalLocation, shipment) => {
+//     // In Transit এর জন্য
+//     if (status.includes('transit') || status === 'in_transit' || status === 'in_transit_sea_freight') {
+//         if (shipment.consolidationId?.vesselName) {
+//             return `In Transit - ${shipment.consolidationId.vesselName}`;
+//         }
+//         if (shipment.shipmentDetails?.destination) {
+//             return `In Transit to ${shipment.shipmentDetails.destination}`;
+//         }
+//         return 'In Transit to Destination';
+//     }
     
-    // Dispatched এর জন্য
-    if (status.includes('dispatch')) {
-        return 'Departed from Origin';
-    }
+//     // Dispatched এর জন্য
+//     if (status.includes('dispatch')) {
+//         return 'Departed from Origin';
+//     }
     
-    // Departed এর জন্য
-    if (status.includes('depart')) {
-        return 'Departed from Port';
-    }
+//     // Departed এর জন্য
+//     if (status.includes('depart')) {
+//         return 'Departed from Port';
+//     }
     
-    // Arrived এর জন্য
-    if (status.includes('arrive')) {
-        return shipment.shipmentDetails?.destination || 'Arrived at Destination';
-    }
+//     // Arrived এর জন্য
+//     if (status.includes('arrive')) {
+//         return shipment.shipmentDetails?.destination || 'Arrived at Destination';
+//     }
     
-    // Customs এর জন্য
-    if (status.includes('customs')) {
-        return 'Customs Clearance';
-    }
+//     // Customs এর জন্য
+//     if (status.includes('customs')) {
+//         return 'Customs Clearance';
+//     }
     
-    // Out for Delivery এর জন্য
-    if (status.includes('out_for_delivery')) {
-        return 'Out for Delivery';
-    }
+//     // Out for Delivery এর জন্য
+//     if (status.includes('out_for_delivery')) {
+//         return 'Out for Delivery';
+//     }
     
-    // Delivered এর জন্য
-    if (status.includes('delivered')) {
-        return 'Delivered';
-    }
+//     // Delivered এর জন্য
+//     if (status.includes('delivered')) {
+//         return 'Delivered';
+//     }
     
-    // China Warehouse হলে পরিবর্তন করুন
-    if (originalLocation === 'China Warehouse' || originalLocation === 'Warehouse') {
-        if (status.includes('receive')) {
-            return 'Origin Warehouse';
-        }
-        if (status.includes('consolidat')) {
-            return 'Consolidation Center';
-        }
-        if (status.includes('load')) {
-            return 'Loading Dock';
-        }
-        return 'Origin Facility';
-    }
+//     // China Warehouse হলে পরিবর্তন করুন
+//     if (originalLocation === 'China Warehouse' || originalLocation === 'Warehouse') {
+//         if (status.includes('receive')) {
+//             return 'Origin Warehouse';
+//         }
+//         if (status.includes('consolidat')) {
+//             return 'Consolidation Center';
+//         }
+//         if (status.includes('load')) {
+//             return 'Loading Dock';
+//         }
+//         return 'Origin Facility';
+//     }
     
-    return originalLocation || 'Location Unknown';
-};
+//     return originalLocation || 'Location Unknown';
+// };
 
 // কনসলিডেশন লোকেশন ফাংশন
-const getConsolidationLocation = (event, shipment) => {
-    const status = event.status?.toLowerCase() || '';
+// const getConsolidationLocation = (event, shipment) => {
+//     const status = event.status?.toLowerCase() || '';
     
-    if (status.includes('transit')) {
-        return shipment.consolidationId?.vesselName ? 
-            `In Transit - ${shipment.consolidationId.vesselName}` : 
-            'In Transit to Destination';
-    }
+//     if (status.includes('transit')) {
+//         return shipment.consolidationId?.vesselName ? 
+//             `In Transit - ${shipment.consolidationId.vesselName}` : 
+//             'In Transit to Destination';
+//     }
     
-    if (status.includes('depart') || status.includes('dispatch')) {
-        return 'Departed from Port';
-    }
+//     if (status.includes('depart') || status.includes('dispatch')) {
+//         return 'Departed from Port';
+//     }
     
-    if (status.includes('arrive')) {
-        return shipment.consolidationId?.destinationPort || 'Destination Port';
-    }
+//     if (status.includes('arrive')) {
+//         return shipment.consolidationId?.destinationPort || 'Destination Port';
+//     }
     
-    if (event.location === 'China Warehouse' || event.location === 'Warehouse') {
-        if (status.includes('consolidat')) {
-            return 'Consolidation Hub';
-        }
-        return 'Origin Facility';
-    }
+//     if (event.location === 'China Warehouse' || event.location === 'Warehouse') {
+//         if (status.includes('consolidat')) {
+//             return 'Consolidation Hub';
+//         }
+//         return 'Origin Facility';
+//     }
     
-    return event.location || 'Facility';
-};
+//     return event.location || 'Facility';
+// };
 
 // ফরম্যাট ডেট ফাংশন (যদি না থাকে)
-const formatDate = (date) => {
-    if (!date) return 'N/A';
-    return new Date(date).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-};
+// const formatDate = (date) => {
+//     if (!date) return 'N/A';
+//     return new Date(date).toLocaleString('en-US', {
+//         year: 'numeric',
+//         month: 'short',
+//         day: 'numeric',
+//         hour: '2-digit',
+//         minute: '2-digit'
+//     });
+// };
 // Generate shipment number
 async function generateShipmentNumber() {
     const date = new Date();
@@ -480,6 +480,7 @@ exports.getBookingById = async (req, res) => {
 };
 
 // ========== 4. UPDATE PRICE QUOTE (Admin) ==========
+// ========== 4. UPDATE PRICE QUOTE (Admin) ==========
 exports.updatePriceQuote = async (req, res) => {
     try {
         const { id } = req.params;
@@ -495,14 +496,38 @@ exports.updatePriceQuote = async (req, res) => {
             });
         }
 
-        if (booking.status !== 'booking_requested') {
+        // Check if booking can be updated
+        if (booking.status === 'booking_confirmed' || booking.status === 'cancelled' || booking.status === 'rejected') {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Cannot update price for this booking status' 
+                message: `Cannot update price quote for booking with status: ${booking.status}` 
             });
         }
 
-        // Update with price quote - Schema অনুযায়ী
+        // Check if this is an update or first quote
+        const isUpdate = booking.quotedPrice && booking.quotedPrice.amount;
+        
+        // Save previous quote history safely
+        let previousQuotes = [];
+        if (isUpdate && booking.quotedPrice) {
+            previousQuotes = [
+                ...(booking.quotedPrice.previousQuotes || []),
+                {
+                    amount: booking.quotedPrice.amount,
+                    currency: booking.quotedPrice.currency,
+                    quotedAt: booking.quotedPrice.quotedAt,
+                    quotedBy: booking.quotedPrice.quotedBy,
+                    notes: booking.quotedPrice.notes
+                }
+            ];
+        }
+
+        // Store previous amount safely for timeline message
+        const previousAmount = isUpdate && booking.quotedPrice && booking.quotedPrice.amount 
+            ? booking.quotedPrice.amount 
+            : null;
+
+        // Update price quote
         booking.quotedPrice = {
             amount,
             currency,
@@ -518,26 +543,42 @@ exports.updatePriceQuote = async (req, res) => {
             quotedBy: req.user._id,
             quotedAt: new Date(),
             validUntil: validUntil || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            notes
+            notes,
+            previousQuotes: previousQuotes
         };
         
         booking.pricingStatus = 'quoted';
-        booking.status = 'price_quoted';
+        
+        // Update booking status only if it's first quote
+        if (booking.status === 'booking_requested') {
+            booking.status = 'price_quoted';
+        }
+        
+        // Create timeline entry with safe metadata
+        const timelineMessage = isUpdate 
+            ? `Price quote updated: ${currency} ${amount}${previousAmount ? ` (Previous: ${currency} ${previousAmount})` : ''}`
+            : `Price quoted: ${currency} ${amount}`;
         
         booking.addTimelineEntry(
             'price_quoted',
-            `Price quoted: ${currency} ${amount}`,
+            timelineMessage,
             req.user._id,
-            { amount, currency }
+            { 
+                amount, 
+                currency, 
+                isUpdate: isUpdate,
+                previousAmount: previousAmount,
+                quotedAt: new Date()
+            }
         );
 
         await booking.save();
 
-        // Send email to Customer
+        // Send email notification
         if (booking.customer?.email) {
             await sendEmail({
                 to: booking.customer.email,
-                subject: '💰 Price Quote Ready for Your Booking',
+                subject: `💰 ${isUpdate ? 'Updated' : 'New'} Price Quote for Your Booking`,
                 template: 'price-quote-ready',
                 data: {
                     bookingNumber: booking.bookingNumber,
@@ -546,16 +587,17 @@ exports.updatePriceQuote = async (req, res) => {
                     currency: currency,
                     validUntil: booking.quotedPrice.validUntil,
                     breakdown: breakdown,
-                    // acceptUrl: `${process.env.FRONTEND_URL}/booking/${booking._id}/accept`,
-                    // rejectUrl: `${process.env.FRONTEND_URL}/booking/${booking._id}/reject`,
-                    // dashboardUrl: `${process.env.FRONTEND_URL}/customer/dashboard`
+                    isUpdate: isUpdate,
+                    previousAmount: previousAmount
                 }
-            });
+            }).catch(err => console.error('Email error:', err));
         }
 
         res.status(200).json({
             success: true,
-            message: 'Price quote sent to customer',
+            message: isUpdate ? 
+                'Price quote updated successfully' : 
+                'Price quote sent to customer',
             data: booking
         });
 
@@ -2367,14 +2409,16 @@ exports.trackByNumber = async (req, res) => {
         let shipment = await Shipment.findOne({ trackingNumber })
             .populate({
                 path: 'bookingId',
-                select: 'bookingNumber sender receiver dates shipmentDetails'
+                select: 'bookingNumber sender receiver dates shipmentDetails packageDetails'
             })
             .populate('customerId', 'companyName firstName lastName')
             .populate({
                 path: 'consolidationId',
-                select: 'consolidationNumber containerNumber vesselName voyageNumber originWarehouse destinationPort timeline'
+                select: 'consolidationNumber containerNumber vesselName voyageNumber originWarehouse destinationPort timeline packageDetails'
             })
             .lean();
+
+        let packages = []; // Initialize packages array
 
         // Shipment না পেলে Booking এ খুঁজুন
         if (!shipment) {
@@ -2384,13 +2428,44 @@ exports.trackByNumber = async (req, res) => {
                 .lean();
 
             if (booking) {
+                // Extract packages from booking
+                if (booking.packageDetails && booking.packageDetails.length > 0) {
+                    packages = booking.packageDetails;
+                } else if (booking.shipmentDetails?.packageDetails) {
+                    packages = booking.shipmentDetails.packageDetails;
+                }
+                
                 shipment = {
                     ...booking,
                     type: 'booking',
                     trackingNumber: booking.trackingNumber,
-                    packages: booking.shipmentDetails?.packageDetails || [],
+                    packages: packages,
                     milestones: booking.timeline || []
                 };
+            }
+        } else {
+            // Extract packages from shipment
+            if (shipment.packageDetails && shipment.packageDetails.length > 0) {
+                packages = shipment.packageDetails;
+            } else if (shipment.bookingId?.packageDetails && shipment.bookingId.packageDetails.length > 0) {
+                packages = shipment.bookingId.packageDetails;
+            } else if (shipment.shipmentDetails?.packageDetails && shipment.shipmentDetails.packageDetails.length > 0) {
+                packages = shipment.shipmentDetails.packageDetails;
+            } else if (shipment.consolidationId?.packageDetails && shipment.consolidationId.packageDetails.length > 0) {
+                packages = shipment.consolidationId.packageDetails;
+            }
+            
+            // If still no packages, create a default package from shipment info
+            if (packages.length === 0 && shipment.shipmentDetails) {
+                packages = [{
+                    packageNumber: shipment.shipmentNumber || shipment.trackingNumber,
+                    description: shipment.shipmentDetails.goodsDescription || 'General Cargo',
+                    quantity: shipment.shipmentDetails.totalPackages || 1,
+                    weight: shipment.shipmentDetails.totalWeight || 0,
+                    volume: shipment.shipmentDetails.totalVolume || 0,
+                    dimensions: shipment.shipmentDetails.dimensions,
+                    type: shipment.shipmentDetails.packageType || 'Carton'
+                }];
             }
         }
 
@@ -2505,10 +2580,19 @@ exports.trackByNumber = async (req, res) => {
             }
         }
 
+        // Calculate total weight and volume from packages
+        let totalWeight = 0;
+        let totalVolume = 0;
+        
+        packages.forEach(pkg => {
+            totalWeight += (pkg.weight || 0);
+            totalVolume += (pkg.volume || 0);
+        });
+
         // ===== ফাইনাল রেসপন্স =====
         const trackingInfo = {
             trackingNumber: shipment.trackingNumber,
-            bookingNumber: shipment.bookingId?.bookingNumber,
+            bookingNumber: shipment.bookingId?.bookingNumber || shipment.bookingNumber,
             shipmentNumber: shipment.shipmentNumber,
             
             status: shipment.status,
@@ -2518,20 +2602,28 @@ exports.trackByNumber = async (req, res) => {
             // গুরুত্বপূর্ণ: এখানে China Warehouse আসবে না
             currentLocation: currentLocation,
             
-            origin: shipment.shipmentDetails?.origin || 'China',
-            destination: shipment.shipmentDetails?.destination || 'USA',
+            origin: shipment.shipmentDetails?.origin || shipment.origin || 'China',
+            destination: shipment.shipmentDetails?.destination || shipment.destination || 'USA',
             
-            estimatedDeparture: shipment.dates?.estimatedDeparture,
-            estimatedDepartureFormatted: formatDate(shipment.dates?.estimatedDeparture),
+            estimatedDeparture: shipment.dates?.estimatedDeparture || shipment.estimatedDeparture,
+            estimatedDepartureFormatted: formatDate(shipment.dates?.estimatedDeparture || shipment.estimatedDeparture),
             
-            estimatedArrival: shipment.dates?.estimatedArrival,
-            estimatedArrivalFormatted: formatDate(shipment.dates?.estimatedArrival),
+            estimatedArrival: shipment.dates?.estimatedArrival || shipment.estimatedArrival,
+            estimatedArrivalFormatted: formatDate(shipment.dates?.estimatedArrival || shipment.estimatedArrival),
             
-            actualDelivery: shipment.dates?.delivered,
-            actualDeliveryFormatted: formatDate(shipment.dates?.delivered),
+            actualDelivery: shipment.dates?.delivered || shipment.actualDelivery,
+            actualDeliveryFormatted: formatDate(shipment.dates?.delivered || shipment.actualDelivery),
             
             lastUpdate: uniqueTimeline[0]?.date || shipment.updatedAt,
             lastUpdateFormatted: formatDate(uniqueTimeline[0]?.date || shipment.updatedAt),
+            
+            // PACKAGE DETAILS - ADDED HERE
+            packages: packages,
+            
+            // Package summary
+            totalPackages: packages.length,
+            totalWeight: totalWeight,
+            totalVolume: totalVolume,
             
             // কনসলিডেশন তথ্য
             consolidation: shipment.consolidationId ? {
@@ -2540,14 +2632,32 @@ exports.trackByNumber = async (req, res) => {
                 vesselName: shipment.consolidationId.vesselName,
                 voyageNumber: shipment.consolidationId.voyageNumber,
                 originWarehouse: shipment.consolidationId.originWarehouse,
-                destinationPort: shipment.consolidationId.destinationPort
+                destinationPort: shipment.consolidationId.destinationPort,
+                packages: packages // Also include packages in consolidation if needed
             } : null,
+            
+            // Shipment details with package info
+            shipmentDetails: {
+                totalPackages: packages.length,
+                totalWeight: totalWeight,
+                totalVolume: totalVolume,
+                shippingMode: shipment.shippingMode || shipment.shipmentDetails?.shippingMode || 'DDU',
+                serviceType: shipment.serviceType || shipment.shipmentDetails?.serviceType || 'standard',
+                origin: shipment.shipmentDetails?.origin || shipment.origin || 'China',
+                destination: shipment.shipmentDetails?.destination || shipment.destination || 'USA',
+                notes: shipment.notes || shipment.shipmentDetails?.notes,
+                packages: packages // Include packages here too for compatibility
+            },
             
             // টাইমলাইন (China Warehouse ছাড়া)
             timeline: uniqueTimeline.slice(0, 30),
             
             // সেন্ডার/রিসিভার
-            sender: shipment.sender || shipment.bookingId?.sender,
+            sender: shipment.sender || shipment.bookingId?.sender || {
+                name: shipment.customerId?.companyName || shipment.customerId?.firstName + ' ' + shipment.customerId?.lastName,
+                email: shipment.customerId?.email,
+                phone: shipment.customerId?.phone
+            },
             receiver: shipment.receiver || shipment.bookingId?.receiver
         };
 
@@ -2556,8 +2666,11 @@ exports.trackByNumber = async (req, res) => {
             tracking: trackingInfo.trackingNumber,
             status: trackingInfo.status,
             location: trackingInfo.currentLocation,
+            packagesCount: trackingInfo.packages.length,
             timelineCount: trackingInfo.timeline.length
         });
+
+        console.log('📦 Package details:', JSON.stringify(packages, null, 2));
 
         res.status(200).json({
             success: true,
@@ -2573,204 +2686,251 @@ exports.trackByNumber = async (req, res) => {
     }
 };
 
-// স্ট্যাটাস ডেসক্রিপশন
-function getStatusDescription(status) {
-    const descriptions = {
-        'pending': 'Shipment created',
-        'booking_confirmed': 'Booking confirmed',
-        'received_at_warehouse': 'Shipment received at warehouse',
-        'consolidated': 'Consolidation completed',
-        'loaded_in_container': 'Container loaded',
-        'dispatched': 'Shipment dispatched',
-        'departed_port_of_origin': 'Departed from origin port',
-        'in_transit_sea_freight': 'In transit by sea',
-        'in_transit': 'In transit to destination',
-        'arrived_at_destination_port': 'Arrived at destination port',
-        'customs_cleared': 'Customs cleared',
-        'out_for_delivery': 'Out for delivery',
-        'delivered': 'Delivered successfully'
-    };
-    return descriptions[status] || `Status updated`;
-}
+// Helper function to calculate progress
+// const calculateProgress = (status) => {
+//     if (!status) return 0;
+    
+//     const progressMap = {
+//         'pending': 10,
+//         'picked_up': 20,
+//         'received_at_warehouse': 25,
+//         'pending_consolidation': 28,
+//         'consolidating': 29,
+//         'consolidated': 30,
+//         'ready_for_dispatch': 35,
+//         'loaded_in_container': 38,
+//         'dispatched': 40,
+//         'departed': 45,
+//         'in_transit': 50,
+//         'arrived': 70,
+//         'customs_cleared': 80,
+//         'out_for_delivery': 90,
+//         'delivered': 100,
+//         'completed': 100
+//     };
+    
+//     return progressMap[status] || 50;
+// };
 
-// ==================== হেল্পার ফাংশন ====================
+// Helper function to format status
+// const formatStatus = (status) => {
+//     if (!status) return 'Unknown';
+    
+//     const statusMap = {
+//         'pending': 'Pending',
+//         'picked_up': 'Picked Up',
+//         'received_at_warehouse': 'Received at Warehouse',
+//         'pending_consolidation': 'Pending Consolidation',
+//         'consolidating': 'Consolidating',
+//         'consolidated': 'Consolidated',
+//         'ready_for_dispatch': 'Ready for Dispatch',
+//         'loaded_in_container': 'Loaded in Container',
+//         'dispatched': 'Dispatched',
+//         'departed': 'Departed',
+//         'in_transit': 'In Transit',
+//         'arrived': 'Arrived',
+//         'customs_cleared': 'Customs Cleared',
+//         'out_for_delivery': 'Out for Delivery',
+//         'delivered': 'Delivered',
+//         'completed': 'Completed'
+//     };
+    
+//     return statusMap[status] || status.split('_').map(word => 
+//         word.charAt(0).toUpperCase() + word.slice(1)
+//     ).join(' ');
+// };
 
-function calculateProgress(status, timeline, hasArrived) {
-    console.log('📊 ===== CALCULATING PROGRESS =====');
-    console.log('Status:', status);
-    console.log('Has arrived:', hasArrived);
-    console.log('Timeline length:', timeline?.length);
-    
-    // প্রগ্রেস ম্যাপ
-    const progressMap = {
-        'pending': 10,
-        'picked_up_from_warehouse': 20,
-        'received_at_warehouse': 25,
-        'consolidated': 30,
-        'departed_port_of_origin': 45,
-        'in_transit_sea_freight': 50,
-        'in_transit': 50,
-        'arrived_at_destination_port': 70,
-        'arrived': 70,
-        'customs_cleared': 80,
-        'out_for_delivery': 90,
-        'delivered': 100,
-        'completed': 100
-    };
-    
-    // যদি ডেস্টিনেশনে পৌঁছে থাকে, তাহলে প্রগ্রেস কমপক্ষে 70 হবে
-    let minProgress = hasArrived ? 70 : 0;
-    
-    // টাইমলাইন থেকে সর্বোচ্চ প্রগ্রেস বের করুন
-    let maxProgress = minProgress;
-    
-    if (timeline && timeline.length > 0) {
-        timeline.forEach(event => {
-            const statusLower = event.status?.toLowerCase() || '';
-            let progress = 0;
-            
-            // ডেলিভারি/কমপ্লিট - 100%
-            if (statusLower.includes('delivered') || statusLower.includes('completed')) {
-                progress = 100;
-            }
-            // আউট ফর ডেলিভারি - 90%
-            else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) {
-                progress = 90;
-            }
-            // কাস্টমস ক্লিয়ারড - 80%
-            else if (statusLower.includes('customs_cleared') || statusLower.includes('customs')) {
-                progress = 80;
-            }
-            // অ্যারাইভড - 70%
-            else if (statusLower.includes('arrived')) {
-                progress = 70;
-            }
-            // অন্যান্য স্ট্যাটাস
-            else {
-                progress = progressMap[statusLower] || 0;
-            }
-            
-            if (progress > maxProgress) {
-                maxProgress = progress;
-            }
+// Helper function to format date
+const formatDate = (dateString) => {
+    if (!dateString) return null;
+    try {
+        const date = new Date(dateString);
+        return date.toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
         });
+    } catch {
+        return null;
+    }
+};
+
+// Helper function to get location for status
+const getLocationForStatus = (status, location, shipment) => {
+    if (location && location !== 'China Warehouse' && location !== 'Warehouse') {
+        return location;
     }
     
-    // টাইমলাইন না থাকলে বা কোন প্রগ্রেস না পেলে status থেকে নিন
-    if (maxProgress === minProgress && status) {
-        const statusLower = status.toLowerCase();
-        if (statusLower.includes('delivered') || statusLower.includes('completed')) {
-            maxProgress = 100;
-        } else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) {
-            maxProgress = 90;
-        } else if (statusLower.includes('customs_cleared') || statusLower.includes('customs')) {
-            maxProgress = 80;
-        } else if (statusLower.includes('arrived')) {
-            maxProgress = 70;
-        } else {
-            maxProgress = progressMap[statusLower] || 0;
-        }
-    }
-    
-    console.log('📊 FINAL PROGRESS:', maxProgress);
-    console.log('📊 ===== END =====');
-    
-    return maxProgress;
-}
-
-function formatStatus(status) {
-    if (!status) return 'Unknown';
-    return status.split('_').map(word => 
-        word.charAt(0).toUpperCase() + word.slice(1)
-    ).join(' ');
-}
-
-function getStatusDescription(status) {
-    const descriptions = {
-        'pending': 'Shipment created and pending processing',
-        'picked_up_from_warehouse': 'Package picked up from warehouse',
-        'received_at_warehouse': 'Package received at warehouse',
-        'consolidated': 'Shipment consolidated with other cargo',
-        'departed_port_of_origin': 'Vessel/flight departed from origin port',
-        'in_transit_sea_freight': 'Shipment in transit',
-        'arrived_at_destination_port': 'Arrived at destination port',
-        'customs_cleared': 'Customs clearance completed',
-        'out_for_delivery': 'Out for delivery',
-        'delivered': 'Successfully delivered',
-        'on_hold': 'Shipment on hold',
-        'cancelled': 'Shipment cancelled',
-        'returned': 'Shipment returned to sender'
-    };
-    return descriptions[status] || `Status updated to ${formatStatus(status)}`;
-}
-
-// ==================== হেল্পার ফাংশন ====================
-
-// ==================== হেল্পার ফাংশন ====================
-
-function calculateProgress(status, timeline) {
-    // প্রগ্রেস ম্যাপ
-    const progressMap = {
-        'pending': 10,
-        'picked_up_from_warehouse': 20,
-        'received_at_warehouse': 25,
-        'consolidated': 30,
-        'departed_port_of_origin': 45,
-        'in_transit_sea_freight': 50,
-        'in_transit': 50,
-        'arrived_at_destination_port': 70,
-        'arrived': 70,
-        'customs_cleared': 80,
-        'out_for_delivery': 90,
-        'delivered': 100,
-        'completed': 100
-    };
-    
-    // যদি টাইমলাইন থাকে, তাহলে সেখান থেকে সর্বোচ্চ প্রগ্রেস বের করুন
-    if (timeline && timeline.length > 0) {
-        let maxProgress = 0;
-        
-        timeline.forEach(event => {
-            const statusLower = event.status?.toLowerCase() || '';
-            let progress = 0;
-            
-            if (statusLower.includes('delivered') || statusLower.includes('completed')) {
-                progress = 100;
-            } else if (statusLower.includes('out_for_delivery')) {
-                progress = 90;
-            } else if (statusLower.includes('customs_cleared')) {
-                progress = 80;
-            } else if (statusLower.includes('arrived')) {
-                progress = 70;
-            } else {
-                // Direct map lookup
-                progress = progressMap[statusLower] || 0;
-            }
-            
-            if (progress > maxProgress) {
-                maxProgress = progress;
-            }
-        });
-        
-        console.log('📊 Max progress from timeline:', maxProgress);
-        return maxProgress;
-    }
-    
-    // টাইমলাইন না থাকলে status থেকে প্রগ্রেস
     const statusLower = status?.toLowerCase() || '';
     
-    if (statusLower.includes('delivered') || statusLower.includes('completed')) {
-        return 100;
-    } else if (statusLower.includes('out_for_delivery')) {
-        return 90;
-    } else if (statusLower.includes('customs_cleared')) {
-        return 80;
-    } else if (statusLower.includes('arrived')) {
-        return 70;
+    if (statusLower.includes('transit')) {
+        return 'In Transit';
     }
     
-    return progressMap[statusLower] || 0;
-}
+    if (statusLower.includes('arrive')) {
+        return shipment.shipmentDetails?.destination || 'Destination';
+    }
+    
+    if (statusLower.includes('customs')) {
+        return 'Customs Clearance';
+    }
+    
+    if (statusLower.includes('delivery') || statusLower.includes('delivered')) {
+        return shipment.shipmentDetails?.destination || 'Delivery Location';
+    }
+    
+    return shipment.shipmentDetails?.origin || 'Origin';
+};
+
+// Helper function to get consolidation location
+const getConsolidationLocation = (event, shipment) => {
+    if (event.location && event.location !== 'China Warehouse') {
+        return event.location;
+    }
+    
+    const statusLower = event.status?.toLowerCase() || '';
+    
+    if (statusLower.includes('warehouse')) {
+        return shipment.consolidationId?.originWarehouse || 'Origin Warehouse';
+    }
+    
+    if (statusLower.includes('port')) {
+        return shipment.consolidationId?.destinationPort || 'Destination Port';
+    }
+    
+    return 'Consolidation Facility';
+};
+
+// Helper function to get status description
+// const getStatusDescription = (status) => {
+//     const descriptions = {
+//         'pending': 'Shipment information received',
+//         'picked_up': 'Shipment picked up from shipper',
+//         'received_at_warehouse': 'Shipment received at warehouse',
+//         'pending_consolidation': 'Awaiting consolidation',
+//         'consolidating': 'Shipment is being consolidated',
+//         'consolidated': 'Shipment consolidated with other cargo',
+//         'ready_for_dispatch': 'Ready for dispatch',
+//         'loaded_in_container': 'Loaded in container',
+//         'dispatched': 'Shipment dispatched',
+//         'departed': 'Shipment departed from origin',
+//         'in_transit': 'Shipment in transit',
+//         'arrived': 'Shipment arrived at destination',
+//         'customs_cleared': 'Customs clearance completed',
+//         'out_for_delivery': 'Out for delivery',
+//         'delivered': 'Shipment delivered',
+//         'completed': 'Shipment completed'
+//     };
+    
+//     return descriptions[status] || 'Status update';
+// };
+
+// স্ট্যাটাস ডেসক্রিপশন
+// function getStatusDescription(status) {
+//     const descriptions = {
+//         'pending': 'Shipment created',
+//         'booking_confirmed': 'Booking confirmed',
+//         'received_at_warehouse': 'Shipment received at warehouse',
+//         'consolidated': 'Consolidation completed',
+//         'loaded_in_container': 'Container loaded',
+//         'dispatched': 'Shipment dispatched',
+//         'departed_port_of_origin': 'Departed from origin port',
+//         'in_transit_sea_freight': 'In transit by sea',
+//         'in_transit': 'In transit to destination',
+//         'arrived_at_destination_port': 'Arrived at destination port',
+//         'customs_cleared': 'Customs cleared',
+//         'out_for_delivery': 'Out for delivery',
+//         'delivered': 'Delivered successfully'
+//     };
+//     return descriptions[status] || `Status updated`;
+// }
+
+// ==================== হেল্পার ফাংশন ====================
+
+// function calculateProgress(status, timeline, hasArrived) {
+//     console.log('📊 ===== CALCULATING PROGRESS =====');
+//     console.log('Status:', status);
+//     console.log('Has arrived:', hasArrived);
+//     console.log('Timeline length:', timeline?.length);
+    
+//     // প্রগ্রেস ম্যাপ
+//     const progressMap = {
+//         'pending': 10,
+//         'picked_up_from_warehouse': 20,
+//         'received_at_warehouse': 25,
+//         'consolidated': 30,
+//         'departed_port_of_origin': 45,
+//         'in_transit_sea_freight': 50,
+//         'in_transit': 50,
+//         'arrived_at_destination_port': 70,
+//         'arrived': 70,
+//         'customs_cleared': 80,
+//         'out_for_delivery': 90,
+//         'delivered': 100,
+//         'completed': 100
+//     };
+    
+//     // যদি ডেস্টিনেশনে পৌঁছে থাকে, তাহলে প্রগ্রেস কমপক্ষে 70 হবে
+//     let minProgress = hasArrived ? 70 : 0;
+    
+//     // টাইমলাইন থেকে সর্বোচ্চ প্রগ্রেস বের করুন
+//     let maxProgress = minProgress;
+    
+//     if (timeline && timeline.length > 0) {
+//         timeline.forEach(event => {
+//             const statusLower = event.status?.toLowerCase() || '';
+//             let progress = 0;
+            
+//             // ডেলিভারি/কমপ্লিট - 100%
+//             if (statusLower.includes('delivered') || statusLower.includes('completed')) {
+//                 progress = 100;
+//             }
+//             // আউট ফর ডেলিভারি - 90%
+//             else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) {
+//                 progress = 90;
+//             }
+//             // কাস্টমস ক্লিয়ারড - 80%
+//             else if (statusLower.includes('customs_cleared') || statusLower.includes('customs')) {
+//                 progress = 80;
+//             }
+//             // অ্যারাইভড - 70%
+//             else if (statusLower.includes('arrived')) {
+//                 progress = 70;
+//             }
+//             // অন্যান্য স্ট্যাটাস
+//             else {
+//                 progress = progressMap[statusLower] || 0;
+//             }
+            
+//             if (progress > maxProgress) {
+//                 maxProgress = progress;
+//             }
+//         });
+//     }
+    
+//     // টাইমলাইন না থাকলে বা কোন প্রগ্রেস না পেলে status থেকে নিন
+//     if (maxProgress === minProgress && status) {
+//         const statusLower = status.toLowerCase();
+//         if (statusLower.includes('delivered') || statusLower.includes('completed')) {
+//             maxProgress = 100;
+//         } else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) {
+//             maxProgress = 90;
+//         } else if (statusLower.includes('customs_cleared') || statusLower.includes('customs')) {
+//             maxProgress = 80;
+//         } else if (statusLower.includes('arrived')) {
+//             maxProgress = 70;
+//         } else {
+//             maxProgress = progressMap[statusLower] || 0;
+//         }
+//     }
+    
+//     console.log('📊 FINAL PROGRESS:', maxProgress);
+//     console.log('📊 ===== END =====');
+    
+//     return maxProgress;
+// }
 
 function formatStatus(status) {
     if (!status) return 'Unknown';
@@ -2779,21 +2939,115 @@ function formatStatus(status) {
     ).join(' ');
 }
 
-function getStatusDescription(status) {
-    const descriptions = {
-        'pending': 'Shipment created and pending processing',
-        'picked_up_from_warehouse': 'Package picked up from warehouse',
-        'received_at_warehouse': 'Package received at warehouse',
-        'consolidated': 'Shipment consolidated with other cargo',
-        'departed_port_of_origin': 'Vessel/flight departed from origin port',
-        'in_transit_sea_freight': 'Shipment in transit',
-        'arrived_at_destination_port': 'Arrived at destination port',
-        'customs_cleared': 'Customs clearance completed',
-        'out_for_delivery': 'Out for delivery',
-        'delivered': 'Successfully delivered'
-    };
-    return descriptions[status] || `Status updated to ${formatStatus(status)}`;
+// function getStatusDescription(status) {
+//     const descriptions = {
+//         'pending': 'Shipment created and pending processing',
+//         'picked_up_from_warehouse': 'Package picked up from warehouse',
+//         'received_at_warehouse': 'Package received at warehouse',
+//         'consolidated': 'Shipment consolidated with other cargo',
+//         'departed_port_of_origin': 'Vessel/flight departed from origin port',
+//         'in_transit_sea_freight': 'Shipment in transit',
+//         'arrived_at_destination_port': 'Arrived at destination port',
+//         'customs_cleared': 'Customs clearance completed',
+//         'out_for_delivery': 'Out for delivery',
+//         'delivered': 'Successfully delivered',
+//         'on_hold': 'Shipment on hold',
+//         'cancelled': 'Shipment cancelled',
+//         'returned': 'Shipment returned to sender'
+//     };
+//     return descriptions[status] || `Status updated to ${formatStatus(status)}`;
+// }
+
+// ==================== হেল্পার ফাংশন ====================
+
+// ==================== হেল্পার ফাংশন ====================
+
+// function calculateProgress(status, timeline) {
+//     // প্রগ্রেস ম্যাপ
+//     const progressMap = {
+//         'pending': 10,
+//         'picked_up_from_warehouse': 20,
+//         'received_at_warehouse': 25,
+//         'consolidated': 30,
+//         'departed_port_of_origin': 45,
+//         'in_transit_sea_freight': 50,
+//         'in_transit': 50,
+//         'arrived_at_destination_port': 70,
+//         'arrived': 70,
+//         'customs_cleared': 80,
+//         'out_for_delivery': 90,
+//         'delivered': 100,
+//         'completed': 100
+//     };
+    
+//     // যদি টাইমলাইন থাকে, তাহলে সেখান থেকে সর্বোচ্চ প্রগ্রেস বের করুন
+//     if (timeline && timeline.length > 0) {
+//         let maxProgress = 0;
+        
+//         timeline.forEach(event => {
+//             const statusLower = event.status?.toLowerCase() || '';
+//             let progress = 0;
+            
+//             if (statusLower.includes('delivered') || statusLower.includes('completed')) {
+//                 progress = 100;
+//             } else if (statusLower.includes('out_for_delivery')) {
+//                 progress = 90;
+//             } else if (statusLower.includes('customs_cleared')) {
+//                 progress = 80;
+//             } else if (statusLower.includes('arrived')) {
+//                 progress = 70;
+//             } else {
+//                 // Direct map lookup
+//                 progress = progressMap[statusLower] || 0;
+//             }
+            
+//             if (progress > maxProgress) {
+//                 maxProgress = progress;
+//             }
+//         });
+        
+//         console.log('📊 Max progress from timeline:', maxProgress);
+//         return maxProgress;
+//     }
+    
+//     // টাইমলাইন না থাকলে status থেকে প্রগ্রেস
+//     const statusLower = status?.toLowerCase() || '';
+    
+//     if (statusLower.includes('delivered') || statusLower.includes('completed')) {
+//         return 100;
+//     } else if (statusLower.includes('out_for_delivery')) {
+//         return 90;
+//     } else if (statusLower.includes('customs_cleared')) {
+//         return 80;
+//     } else if (statusLower.includes('arrived')) {
+//         return 70;
+//     }
+    
+//     return progressMap[statusLower] || 0;
+// }
+
+function formatStatus(status) {
+    if (!status) return 'Unknown';
+    return status.split('_').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
 }
+
+// function getStatusDescription(status) {
+//     const descriptions = {
+//         'pending': 'Shipment created and pending processing',
+//         'picked_up_from_warehouse': 'Package picked up from warehouse',
+//         'received_at_warehouse': 'Package received at warehouse',
+//         'consolidated': 'Shipment consolidated with other cargo',
+//         'departed_port_of_origin': 'Vessel/flight departed from origin port',
+//         'in_transit_sea_freight': 'Shipment in transit',
+//         'arrived_at_destination_port': 'Arrived at destination port',
+//         'customs_cleared': 'Customs clearance completed',
+//         'out_for_delivery': 'Out for delivery',
+//         'delivered': 'Successfully delivered'
+//     };
+//     return descriptions[status] || `Status updated to ${formatStatus(status)}`;
+// }
 
 // ==================== হেল্পার ফাংশন ====================
 // ==================== হেল্পার ফাংশন ====================
