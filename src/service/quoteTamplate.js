@@ -11,8 +11,8 @@ const createTransporter = () => {
     port: parseInt(process.env.SMTP_PORT) || 587,
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      user: process.env.SMTP_USER_INFO,
+      pass: process.env.SMTP_PASS_INFO,
     },
   });
 };
@@ -231,13 +231,13 @@ router.post('/request-quote', async (req, res) => {
 
     // Send email to admin
     console.log('📧 Sending email to ADMIN...');
-    console.log('  From:', process.env.SMTP_USER);
-    console.log('  To:', process.env.ADMIN_EMAIL || process.env.SMTP_USER);
+    console.log('  From:', process.env.SMTP_USER_INFO);
+    console.log('  To:', process.env.ADMIN_EMAIL || process.env.SMTP_USER_INFO);
     console.log('  Subject:', `🚚 New Quote Request - ${quoteId} - ${formData.origin} to ${formData.destination}`);
     
     const adminInfo = await transporter.sendMail({
-      from: `"B2B Logistics" <${process.env.SMTP_USER}>`,
-      to: process.env.ADMIN_EMAIL || process.env.SMTP_USER,
+      from: `"B2B Logistics" <${process.env.SMTP_USER_INFO}>`,
+      to: process.env.ADMIN_EMAIL || process.env.SMTP_USER_INFO,
       replyTo: formData.email,
       subject: `🚚 New Quote Request - ${quoteId} - ${formData.origin} to ${formData.destination}`,
       html: getAdminEmailTemplate(formData, quoteId)
@@ -250,7 +250,7 @@ router.post('/request-quote', async (req, res) => {
     console.log('  To:', formData.email);
     
     const customerInfo = await transporter.sendMail({
-      from: `"B2B Logistics" <${process.env.SMTP_USER}>`,
+      from: `"B2B Logistics" <${process.env.SMTP_USER_INFO}>`,
       to: formData.email,
       subject: `Quote Request Received - ${quoteId}`,
       html: getCustomerEmailTemplate(formData, quoteId)
