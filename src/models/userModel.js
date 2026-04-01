@@ -36,32 +36,30 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-        // ==================== GOOGLE/FACEBOOK LOGIN FIELDS ====================
-    provider: {
-        type: String,
-        enum: ['local', 'google', 'facebook'],
-        default: 'local'
-    },
-    googleId: {
-        type: String,
-        sparse: true,
-        unique: true,
-        default: null
-    },
-    facebookId: {
-        type: String,
-        sparse: true,
-        unique: true,
-        default: null
-    },
-    avatar: {
-        type: String,
-        default: ""
-    },
-    emailVerified: {
-        type: Boolean,
-        default: false
-    },
+// ==================== GOOGLE/FACEBOOK LOGIN FIELDS ====================
+provider: {
+    type: String,
+    enum: ['local', 'google', 'facebook'],
+    default: 'local'
+},
+googleId: {
+    type: String,
+    sparse: true,
+    unique: true
+},
+facebookId: {
+    type: String,
+    sparse: true,
+    unique: true
+},
+avatar: {
+    type: String,
+    default: ""
+},
+emailVerified: {
+    type: Boolean,
+    default: false
+},
     
     // ==================== ROLE & PERMISSIONS ====================
     role: {

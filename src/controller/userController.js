@@ -487,12 +487,12 @@ const createAdmin = async (req, res) => {
   try {
     const { firstName, lastName, email, password, phone } = req.body;
 
-    // Check if any admin already exists
-    const existingAdmin = await UserModel.findOne({ role: 'admin' });
-    if (existingAdmin) {
+    // Check maximum admin limit (3 admins)
+    const adminCount = await UserModel.countDocuments({ role: 'admin' });
+    if (adminCount >= 3) {
       return res.status(400).json({
         success: false,
-        message: "Admin already exists. Use staff creation for additional admins."
+        message: "Maximum 3 admins allowed. Cannot create more admins."
       });
     }
 
@@ -504,7 +504,7 @@ const createAdmin = async (req, res) => {
       });
     }
 
-    // Check if user already exists
+    // Check if user already exists with this email
     const existingUser = await UserModel.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({
@@ -517,6 +517,9 @@ const createAdmin = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Generate admin ID
+    const adminId = `ADMIN-${(adminCount + 1).toString().padStart(2, '0')}`;
+
     // Create admin user
     const admin = new UserModel({
       firstName,
@@ -525,6 +528,7 @@ const createAdmin = async (req, res) => {
       password: hashedPassword,
       phone: phone || "",
       role: 'admin',
+      adminId: adminId,
       isVerified: true,
       status: 'active',
       isActive: true,
@@ -540,7 +544,7 @@ const createAdmin = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Admin created successfully",
+      message: `Admin created successfully (${adminCount + 1}/3 admins)`,
       data: adminData
     });
 
@@ -1133,12 +1137,12 @@ const deleteUser = async (req, res) => {
       });
     }
 
-    if (user.role === 'admin') {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete another admin"
-      });
-    }
+    // if (user.role === 'admin') {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Cannot delete another admin"
+    //   });
+    // }
 
     await UserModel.findByIdAndDelete(userId);
 
