@@ -11,6 +11,14 @@ const { sendEmail } = require('../utils/emailService');
 /**
  * Get on hold shipments in a consolidation
  */
+// ফাংশনের শুরুতে এই হেল্পার ফাংশন যোগ করুন
+function generateSealNumber() {
+    const year = new Date().getFullYear();
+    const month = String(new Date().getMonth() + 1).padStart(2, '0');
+    const day = String(new Date().getDate()).padStart(2, '0');
+    const random = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    return `SEL-${year}${month}${day}-${random}`;
+}
 exports.getOnHoldShipments = async (req, res) => {
   try {
     const { id } = req.params;
@@ -544,15 +552,24 @@ exports.getQueueSummary = async (req, res) => {
 exports.createConsolidation = async (req, res) => {
     try {
         const {
-            groupKey,  // এই গ্রুপের জন্য consolidation তৈরি হবে
+            groupKey,
             containerNumber,
             containerType,
             sealNumber,
             estimatedDeparture,
-            selectedShipmentIds,  // এই গ্রুপের selected shipment গুলো
+            selectedShipmentIds,
         } = req.body;
 
-        // ========== VALIDATION ==========
+        // Helper function for seal number generation
+        function generateSealNumber() {
+            const year = new Date().getFullYear();
+            const month = String(new Date().getMonth() + 1).padStart(2, '0');
+            const day = String(new Date().getDate()).padStart(2, '0');
+            const random = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+            return `SEL-${year}${month}${day}-${random}`;
+        }
+
+        // Validation
         if (!groupKey) {
             return res.status(400).json({
                 success: false,
@@ -567,11 +584,10 @@ exports.createConsolidation = async (req, res) => {
             });
         }
 
-        // ========== GET SELECTED SHIPMENTS ==========
-        // শুধু selectedShipmentIds এবং specific group এর জন্য
+        // Get selected shipments
         const queueItems = await ConsolidationQueue.find({
             _id: { $in: selectedShipmentIds },
-            groupKey: groupKey,  // important: same group
+            groupKey: groupKey,
             status: 'pending'
         })
         .populate('shipmentId')
@@ -584,20 +600,7 @@ exports.createConsolidation = async (req, res) => {
             });
         }
 
-        // ========== VERIFY ALL SHIPMENTS BELONG TO SAME GROUP ==========
-        // যদিও আমরা groupKey দিয়ে ফিল্টার করেছি, তবুও চেক করে নিই
-        const invalidItems = queueItems.filter(item => item.groupKey !== groupKey);
-        
-        if (invalidItems.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'All shipments must belong to the same group',
-                expectedGroup: groupKey,
-                invalidShipments: invalidItems.map(i => i.trackingNumber)
-            });
-        }
-
-        // ========== CALCULATE TOTALS ==========
+        // Calculate totals
         let totalPackages = 0;
         let totalWeight = 0;
         let totalVolume = 0;
@@ -623,16 +626,24 @@ exports.createConsolidation = async (req, res) => {
             }
         }
 
-        // ========== FIRST ITEM FOR REFERENCE ==========
         const firstItem = queueItems[0];
-        
-        // ========== GENERATE CONSOLIDATION NUMBER ==========
         const consolidationNumber = generateConsolidationNumber(
             firstItem.mainType, 
             firstItem.destination
         );
 
-        // ========== CREATE CONSOLIDATION ==========
+        // ✅ Generate seal number if not provided
+        const finalSealNumber = sealNumber || generateSealNumber();
+        const finalContainerNumber = containerNumber || `CNTR-${Date.now()}`;
+        const finalContainerType = containerType || estimateContainerType(totalVolume);
+
+        console.log('📦 Creating consolidation with:', {
+            consolidationNumber,
+            sealNumber: finalSealNumber,
+            containerNumber: finalContainerNumber
+        });
+
+        // Create consolidation
         const consolidation = await Consolidation.create({
             consolidationNumber,
             shipments: queueItems.map(q => q.shipmentId._id),
@@ -640,9 +651,9 @@ exports.createConsolidation = async (req, res) => {
             mainType: firstItem.mainType,
             subType: firstItem.subType,
             
-            containerNumber: containerNumber || `CNTR-${Date.now()}`,
-            containerType: containerType || estimateContainerType(totalVolume),
-            sealNumber: sealNumber || '',
+            containerNumber: finalContainerNumber,
+            containerType: finalContainerType,
+            sealNumber: finalSealNumber,  // ← Auto-generated seal number
             
             totalShipments: queueItems.length,
             totalPackages,
@@ -662,12 +673,7 @@ exports.createConsolidation = async (req, res) => {
             createdBy: req.user._id
         });
 
-        console.log('✅ Consolidation created:', consolidation.consolidationNumber);
-        console.log(`📦 Group: ${firstItem.mainType} - ${firstItem.subType} - ${firstItem.origin} → ${firstItem.destination}`);
-        console.log(`📊 Total shipments in this group: ${queueItems.length}`);
-        console.log(`📝 GroupKey: ${groupKey}`);
-
-        // ========== UPDATE QUEUE ITEMS ==========
+        // Update queue items
         await ConsolidationQueue.updateMany(
             { _id: { $in: queueItems.map(q => q._id) } },
             {
@@ -679,20 +685,21 @@ exports.createConsolidation = async (req, res) => {
             }
         );
 
-        // ========== UPDATE SHIPMENTS ==========
+        // Update shipments
         await Shipment.updateMany(
             { _id: { $in: queueItems.map(q => q.shipmentId._id) } },
             {
                 $set: {
                     warehouseStatus: 'consolidated',
                     consolidationId: consolidation._id,
-                    'transport.containerNumber': containerNumber || consolidation.containerNumber
+                    'transport.containerNumber': finalContainerNumber,
+                    'transport.sealNumber': finalSealNumber  // ← Add seal to transport
                 },
                 $push: {
                     milestones: {
                         status: 'consolidated',
                         location: firstItem.origin,
-                        description: `Shipment consolidated into container ${containerNumber || consolidation.containerNumber} for ${firstItem.destination}`,
+                        description: `Shipment consolidated into container ${finalContainerNumber} (Seal: ${finalSealNumber}) for ${firstItem.destination}`,
                         timestamp: new Date(),
                         updatedBy: req.user._id
                     }
@@ -700,7 +707,7 @@ exports.createConsolidation = async (req, res) => {
             }
         );
 
-        // ========== SEND NOTIFICATIONS ==========
+        // Send notifications
         try {
             for (const customer of customerMap.values()) {
                 if (customer.email) {
@@ -714,7 +721,8 @@ exports.createConsolidation = async (req, res) => {
                             shipmentCount: queueItems.filter(q => 
                                 q.customerId?._id.toString() === customer._id.toString()
                             ).length,
-                            destination: firstItem.destination
+                            destination: firstItem.destination,
+                            sealNumber: finalSealNumber  // ← Add seal to email
                         }
                     });
                 }
@@ -906,15 +914,17 @@ exports.updateConsolidation = async (req, res) => {
 
 // controllers/consolidationController.js - সম্পূর্ণ replace করুন
 
+// controllers/consolidationController.js - শুধু updateConsolidationStatus ফাংশন
+
 exports.updateConsolidationStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, actualDeparture, actualArrival, location, notes } = req.body;
+    const { status, actualDeparture, actualArrival, location, notes, forceUpdate } = req.body;
 
     console.log('🔄 ===== UPDATE CONSOLIDATION STATUS =====');
     console.log('🔄 Consolidation ID:', id);
     console.log('🔄 New status:', status);
-    console.log('🔄 Location:', location);
+    console.log('🔄 Force update:', forceUpdate);
 
     const consolidation = await Consolidation.findById(id).populate('shipments');
     
@@ -926,9 +936,42 @@ exports.updateConsolidationStatus = async (req, res) => {
     }
 
     const oldStatus = consolidation.status;
-    console.log(`📦 Old status: ${oldStatus} → New status: ${status}`);
+    
+    // ========== ALLOWED TRANSITIONS ==========
+    const getAllowedTransitions = (currentStatus) => {
+      const transitions = {
+        'draft': ['in_progress', 'ready_for_dispatch', 'cancelled', 'on_hold'],
+        'in_progress': ['consolidated', 'ready_for_dispatch', 'cancelled', 'on_hold'],
+        'consolidated': ['ready_for_dispatch'],
+        'ready_for_dispatch': ['loaded', 'cancelled', 'on_hold'],
+        'loaded': ['dispatched', 'cancelled', 'on_hold'],
+        'dispatched': ['in_transit', 'cancelled'],
+        'in_transit': ['arrived', 'cancelled'],
+        'arrived': ['customs_cleared', 'cancelled'],
+        'customs_cleared': ['out_for_delivery'],
+        'out_for_delivery': ['delivered'],
+        'delivered': ['completed'],
+        'on_hold': ['in_progress', 'cancelled'],
+        'cancelled': [],
+        'completed': []
+      };
+      return transitions[currentStatus] || [];
+    };
 
-    // ✅ Shipment status mapping - সম্পূর্ণ ম্যাপিং
+    // ========== VALIDATION (forceUpdate TRUE হলে স্কিপ) ==========
+    if (!forceUpdate) {
+      const allowedTransitions = getAllowedTransitions(oldStatus);
+      if (!allowedTransitions.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot move from ${oldStatus} to ${status}. Allowed transitions: ${allowedTransitions.join(', ')}`
+        });
+      }
+    }
+
+    console.log(`✅ Validation passed: ${oldStatus} → ${status}`);
+
+    // ========== SHIPMENT STATUS MAPPING ==========
     const getShipmentStatus = (consolStatus) => {
       const statusMap = {
         'draft': 'pending',
@@ -949,10 +992,40 @@ exports.updateConsolidationStatus = async (req, res) => {
       return statusMap[consolStatus] || 'pending';
     };
 
-    const shipmentNewStatus = getShipmentStatus(status);
-    console.log(`📦 Shipment target status: ${shipmentNewStatus}`);
+    // ========== LOCATION & DESCRIPTION HELPERS ==========
+    const getLocationForStatus = (stat, cons) => {
+      const locationMap = {
+        'arrived': cons.destinationPort || 'Destination Port',
+        'customs_cleared': cons.destinationPort || 'Customs',
+        'out_for_delivery': 'Out for Delivery',
+        'delivered': 'Delivered',
+        'completed': 'Completed',
+        'dispatched': 'Dispatched',
+        'in_transit': 'In Transit',
+        'ready_for_dispatch': cons.originWarehouse || 'Warehouse',
+        'loaded': cons.originWarehouse || 'Warehouse'
+      };
+      return locationMap[stat] || cons.originWarehouse || 'Warehouse';
+    };
 
-    // ✅ Update ALL shipments in this consolidation
+    const getDescriptionForStatus = (stat, cons) => {
+      const descMap = {
+        'arrived': `Shipment arrived at ${cons.destinationPort}`,
+        'customs_cleared': 'Customs clearance completed',
+        'out_for_delivery': 'Shipment out for delivery',
+        'delivered': 'Shipment delivered successfully',
+        'completed': 'Shipment completed',
+        'dispatched': 'Shipment dispatched',
+        'in_transit': 'Shipment in transit',
+        'ready_for_dispatch': 'Shipment ready for dispatch',
+        'loaded': 'Shipment loaded into container'
+      };
+      return descMap[stat] || `Status updated to ${stat}`;
+    };
+
+    const shipmentNewStatus = getShipmentStatus(status);
+    
+    // ========== UPDATE ALL SHIPMENTS IN THIS CONSOLIDATION ==========
     const updatedShipments = [];
     
     for (const shipment of consolidation.shipments) {
@@ -961,12 +1034,10 @@ exports.updateConsolidationStatus = async (req, res) => {
       console.log(`  📦 Updating shipment: ${shipment.trackingNumber}`);
       console.log(`     Old status: ${shipment.status} → New: ${shipmentNewStatus}`);
       
-      // Update shipment status
       shipment.status = shipmentNewStatus;
       shipment.currentMilestone = shipmentNewStatus;
       shipment.updatedBy = req.user._id;
       
-      // ✅ Add milestone with proper location
       let milestoneLocation = location || getLocationForStatus(status, consolidation);
       let milestoneDescription = getDescriptionForStatus(status, consolidation);
       
@@ -980,7 +1051,7 @@ exports.updateConsolidationStatus = async (req, res) => {
         updatedBy: req.user._id
       });
       
-      // ✅ Update transport info based on status
+      // Update transport info based on status
       if (!shipment.transport) shipment.transport = {};
       
       switch(status) {
@@ -992,7 +1063,6 @@ exports.updateConsolidationStatus = async (req, res) => {
             timestamp: new Date()
           };
           break;
-          
         case 'in_transit':
           shipment.transport.currentLocation = {
             location: milestoneLocation,
@@ -1000,7 +1070,6 @@ exports.updateConsolidationStatus = async (req, res) => {
             timestamp: new Date()
           };
           break;
-          
         case 'arrived':
           shipment.transport.actualArrival = actualArrival || new Date();
           shipment.transport.currentLocation = {
@@ -1009,23 +1078,6 @@ exports.updateConsolidationStatus = async (req, res) => {
             timestamp: new Date()
           };
           break;
-          
-        case 'customs_cleared':
-          shipment.transport.currentLocation = {
-            location: milestoneLocation,
-            status: 'customs_cleared',
-            timestamp: new Date()
-          };
-          break;
-          
-        case 'out_for_delivery':
-          shipment.transport.currentLocation = {
-            location: milestoneLocation,
-            status: 'out_for_delivery',
-            timestamp: new Date()
-          };
-          break;
-          
         case 'delivered':
         case 'completed':
           if (!shipment.dates) shipment.dates = {};
@@ -1049,11 +1101,11 @@ exports.updateConsolidationStatus = async (req, res) => {
       console.log(`     ✅ Shipment updated successfully`);
     }
 
-    // ✅ Update consolidation
+    // ========== UPDATE CONSOLIDATION ==========
     consolidation.status = status;
     consolidation.updatedBy = req.user._id;
     
-    if (status === 'completed' || status === 'loaded') {
+    if (status === 'completed') {
       consolidation.consolidationCompleted = new Date();
     }
     
@@ -1081,9 +1133,7 @@ exports.updateConsolidationStatus = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Consolidation ${status === 'on_hold' ? 'put on hold' : 
-                                   status === 'cancelled' ? 'cancelled' : 
-                                   `status updated to ${status}`}`,
+      message: `Consolidation status updated to ${status}`,
       data: {
         consolidation,
         shipmentUpdates: updatedShipments,
@@ -1093,10 +1143,12 @@ exports.updateConsolidationStatus = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Update consolidation status error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
   }
 };
-
 // ✅ Helper functions
 function getLocationForStatus(status, consolidation) {
   const locationMap = {

@@ -43,6 +43,7 @@ const shipmentStatuses = [
     'shipment_cancelled',
     'cancelled',
     'returned',
+    'removed_from_queue',
     'return_initiated',
     'return_requested',        // ✅ যোগ করুন
     'return_approved',         // ✅ যোগ করুন

@@ -2758,50 +2758,122 @@ const formatDate = (dateString) => {
 };
 
 // Helper function to get location for status
-const getLocationForStatus = (status, location, shipment) => {
-    if (location && location !== 'China Warehouse' && location !== 'Warehouse') {
+function getLocationForStatus(status, location, shipment) {
+    // ❌ ভুল লোকেশন ফিল্টার করুন
+    if (location === 'Proident dignissimo' || location === 'Consolidation Facility') {
+        return getDefaultLocationForStatus(status, shipment);
+    }
+    
+    if (location && location !== 'Unknown' && location !== 'China Warehouse') {
         return location;
     }
     
+    return getDefaultLocationForStatus(status, shipment);
+}
+function getDefaultLocationForStatus(status, shipment) {
     const statusLower = status?.toLowerCase() || '';
+    const destination = shipment?.shipmentDetails?.destination || shipment?.destination || 'USA';
+    const origin = shipment?.shipmentDetails?.origin || shipment?.origin || 'China';
     
-    if (statusLower.includes('transit')) {
+    // Pending
+    if (statusLower === 'pending') {
+        return origin;
+    }
+    
+    // Received at warehouse
+    if (statusLower === 'received_at_warehouse') {
+        return shipment?.shipmentDetails?.origin || origin;
+    }
+    
+    // In Queue / Consolidated
+    if (statusLower === 'consolidated' || statusLower === 'pending_consolidation') {
+        return shipment?.consolidationId?.originWarehouse || origin;
+    }
+    
+    // Ready for Dispatch
+    if (statusLower === 'ready_for_dispatch') {
+        return shipment?.consolidationId?.originWarehouse || origin;
+    }
+    
+    // Loaded / Dispatched / In Transit
+    if (statusLower === 'loaded_in_container' || statusLower === 'dispatched' || 
+        statusLower === 'in_transit' || statusLower.includes('transit')) {
         return 'In Transit';
     }
     
-    if (statusLower.includes('arrive')) {
-        return shipment.shipmentDetails?.destination || 'Destination';
+    // Arrived
+    if (statusLower === 'arrived_at_destination_port' || statusLower === 'arrived') {
+        return destination;
     }
     
-    if (statusLower.includes('customs')) {
-        return 'Customs Clearance';
+    // Customs
+    if (statusLower === 'customs_cleared' || statusLower.includes('customs')) {
+        return destination;
     }
     
-    if (statusLower.includes('delivery') || statusLower.includes('delivered')) {
-        return shipment.shipmentDetails?.destination || 'Delivery Location';
+    // Out for Delivery
+    if (statusLower === 'out_for_delivery') {
+        return destination;
     }
     
-    return shipment.shipmentDetails?.origin || 'Origin';
-};
-
+    // Delivered / Completed
+    if (statusLower === 'delivered' || statusLower === 'completed') {
+        return destination;
+    }
+    
+    return 'Processing';
+}
 // Helper function to get consolidation location
-const getConsolidationLocation = (event, shipment) => {
-    if (event.location && event.location !== 'China Warehouse') {
-        return event.location;
+function getConsolidationLocation(event, shipment) {
+    let location = event.location;
+    
+    // ❌ ভুল লোকেশন ফিল্টার করুন
+    if (location === 'Proident dignissimo' || location === 'Consolidation Facility') {
+        location = null;
     }
     
-    const statusLower = event.status?.toLowerCase() || '';
-    
-    if (statusLower.includes('warehouse')) {
-        return shipment.consolidationId?.originWarehouse || 'Origin Warehouse';
+    if (location && location !== 'Unknown') {
+        return location;
     }
     
-    if (statusLower.includes('port')) {
-        return shipment.consolidationId?.destinationPort || 'Destination Port';
+    const status = event.status?.toLowerCase() || '';
+    const destination = shipment?.shipmentDetails?.destination || shipment?.destination || 'USA';
+    const origin = shipment?.consolidationId?.originWarehouse || shipment?.shipmentDetails?.origin || 'China';
+    
+    if (status === 'consolidated' || status === 'pending_consolidation') {
+        return origin;
     }
     
-    return 'Consolidation Facility';
-};
+    if (status === 'ready_for_dispatch') {
+        return origin;
+    }
+    
+    if (status === 'loaded_in_container' || status === 'dispatched') {
+        return origin;
+    }
+    
+    if (status === 'in_transit' || status.includes('transit')) {
+        return 'In Transit';
+    }
+    
+    if (status === 'arrived' || status === 'arrived_at_destination_port') {
+        return destination;
+    }
+    
+    if (status === 'customs_cleared') {
+        return destination;
+    }
+    
+    if (status === 'out_for_delivery') {
+        return destination;
+    }
+    
+    if (status === 'delivered' || status === 'completed') {
+        return destination;
+    }
+    
+    return origin;
+}
 
 // Helper function to get status description
 // const getStatusDescription = (status) => {
@@ -3136,29 +3208,47 @@ function calculateProgress(status, timeline) {
 }
 
 function formatStatus(status) {
-    if (!status) return 'Unknown';
-    return status.split('_').map(word => 
-        word.charAt(0).toUpperCase() + word.slice(1)
-    ).join(' ');
+    const statusLower = status?.toLowerCase() || '';
+    
+    const formatted = {
+        'pending': 'Pending',
+        'received_at_warehouse': 'Received at Warehouse',
+        'consolidated': 'Consolidated',
+        'ready_for_dispatch': 'Ready for Dispatch',
+        'loaded_in_container': 'Loaded',
+        'dispatched': 'Dispatched',
+        'in_transit': 'In Transit',
+        'arrived_at_destination_port': 'Arrived at Port',
+        'arrived': 'Arrived',
+        'customs_cleared': 'Customs Cleared',
+        'out_for_delivery': 'Out for Delivery',
+        'delivered': 'Delivered',
+        'completed': 'Completed'
+    };
+    
+    return formatted[statusLower] || status || 'Unknown';
 }
 
 function getStatusDescription(status) {
+    const statusLower = status?.toLowerCase() || '';
+    
     const descriptions = {
         'pending': 'Shipment created and pending processing',
-        'picked_up_from_warehouse': 'Package picked up from warehouse',
-        'received_at_warehouse': 'Package received at warehouse',
-        'consolidated': 'Shipment consolidated with other cargo',
-        'departed_port_of_origin': 'Vessel/flight departed from origin port',
-        'in_transit_sea_freight': 'Shipment in transit',
-        'arrived_at_destination_port': 'Arrived at destination port',
+        'received_at_warehouse': 'Shipment received at warehouse',
+        'consolidated': 'Shipment consolidated into container',
+        'ready_for_dispatch': 'Shipment ready for dispatch',
+        'loaded_in_container': 'Shipment loaded into container',
+        'dispatched': 'Shipment dispatched',
+        'in_transit': 'Shipment in transit',
+        'arrived_at_destination_port': 'Shipment arrived at destination port',
+        'arrived': 'Shipment arrived at destination',
         'customs_cleared': 'Customs clearance completed',
-        'out_for_delivery': 'Out for delivery',
-        'delivered': 'Successfully delivered',
-        'on_hold': 'Shipment on hold',
-        'cancelled': 'Shipment cancelled',
-        'returned': 'Shipment returned to sender'
+        'out_for_delivery': 'Shipment out for delivery',
+        'delivered': 'Shipment delivered successfully',
+        'completed': 'Shipment completed'
     };
-    return descriptions[status] || `Status updated to ${formatStatus(status)}`;
+    
+    return descriptions[statusLower] || `Status updated to ${status}`;
 }
 
 // ========== 15. UPDATE DELIVERY STATUS ==========
