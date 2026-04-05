@@ -282,121 +282,121 @@ exports.getShipmentById = async (req, res) => {
 };
 
 // ========== 3. CREATE SHIPMENT (from Booking) ========== 
-exports.createShipment = async (req, res) => {
-    try {
-        const { bookingId } = req.body;
+// exports.createShipment = async (req, res) => {
+//     try {
+//         const { bookingId } = req.body;
 
-        // Find booking with new schema fields
-        const booking = await Booking.findById(bookingId)
-            .populate('customer', 'firstName lastName companyName email phone address');
+//         // Find booking with new schema fields
+//         const booking = await Booking.findById(bookingId)
+//             .populate('customer', 'firstName lastName companyName email phone address');
 
-        if (!booking) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'Booking not found' 
-            });
-        }
+//         if (!booking) {
+//             return res.status(404).json({ 
+//                 success: false, 
+//                 message: 'Booking not found' 
+//             });
+//         }
 
-        // Check if shipment already exists
-        const existingShipment = await Shipment.findOne({ bookingId });
-        if (existingShipment) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Shipment already exists for this booking' 
-            });
-        }
+//         // Check if shipment already exists
+//         const existingShipment = await Shipment.findOne({ bookingId });
+//         if (existingShipment) {
+//             return res.status(400).json({ 
+//                 success: false, 
+//                 message: 'Shipment already exists for this booking' 
+//             });
+//         }
 
-        // Generate tracking number if not exists
-        let trackingNumber = booking.trackingNumber;
-        if (!trackingNumber) {
-            trackingNumber = await generateTrackingNumber();
-        }
+//         // Generate tracking number if not exists
+//         let trackingNumber = booking.trackingNumber;
+//         if (!trackingNumber) {
+//             trackingNumber = await generateTrackingNumber();
+//         }
 
-        // Create shipment with new schema fields
-        const shipmentData = {
-            shipmentNumber: await generateShipmentNumber(),
-            trackingNumber: trackingNumber,
-            bookingId: booking._id,
-            customerId: booking.customer._id,
-            shipmentDetails: {
-                shipmentType: booking.shipmentDetails?.shipmentType,
-                origin: booking.shipmentDetails?.origin,
-                destination: booking.shipmentDetails?.destination,
-                shippingMode: booking.shipmentDetails?.shippingMode
-            },
-            // নতুন fields
-            sender: booking.sender,
-            receiver: booking.receiver,
-            courier: booking.courier,
-            estimatedDepartureDate: booking.estimatedDepartureDate,
-            estimatedArrivalDate: booking.estimatedArrivalDate,
+//         // Create shipment with new schema fields
+//         const shipmentData = {
+//             shipmentNumber: await generateShipmentNumber(),
+//             trackingNumber: trackingNumber,
+//             bookingId: booking._id,
+//             customerId: booking.customer._id,
+//             shipmentDetails: {
+//                 shipmentType: booking.shipmentDetails?.shipmentType,
+//                 origin: booking.shipmentDetails?.origin,
+//                 destination: booking.shipmentDetails?.destination,
+//                 shippingMode: booking.shipmentDetails?.shippingMode
+//             },
+//             // নতুন fields
+//             sender: booking.sender,
+//             receiver: booking.receiver,
+//             courier: booking.courier,
+//             estimatedDepartureDate: booking.estimatedDepartureDate,
+//             estimatedArrivalDate: booking.estimatedArrivalDate,
             
-            // Packages - cargoDetails থেকে packageDetails
-            packages: (booking.shipmentDetails?.packageDetails || []).map(item => ({
-                description: item.description,
-                packageType: 'Carton',
-                quantity: item.quantity || 1,
-                weight: item.weight || 0,
-                volume: item.volume || 0,
-                dimensions: item.dimensions || {
-                    length: 0, width: 0, height: 0, unit: 'cm'
-                },
-                productCategory: item.productCategory,
-                hsCode: item.hsCode,
-                value: item.value || { amount: 0, currency: 'USD' },
-                condition: 'Good'
-            })),
+//             // Packages - cargoDetails থেকে packageDetails
+//             packages: (booking.shipmentDetails?.packageDetails || []).map(item => ({
+//                 description: item.description,
+//                 packageType: 'Carton',
+//                 quantity: item.quantity || 1,
+//                 weight: item.weight || 0,
+//                 volume: item.volume || 0,
+//                 dimensions: item.dimensions || {
+//                     length: 0, width: 0, height: 0, unit: 'cm'
+//                 },
+//                 productCategory: item.productCategory,
+//                 hsCode: item.hsCode,
+//                 value: item.value || { amount: 0, currency: 'USD' },
+//                 condition: 'Good'
+//             })),
             
-            status: 'pending',
-            createdBy: req.user._id,
-            milestones: [{
-                status: 'pending',
-                location: booking.sender?.address?.country || booking.shipmentDetails?.origin || 'Unknown',
-                description: 'Shipment created from confirmed booking',
-                updatedBy: req.user._id,
-                timestamp: new Date()
-            }]
-        };
+//             status: 'pending',
+//             createdBy: req.user._id,
+//             milestones: [{
+//                 status: 'pending',
+//                 location: booking.sender?.address?.country || booking.shipmentDetails?.origin || 'Unknown',
+//                 description: 'Shipment created from confirmed booking',
+//                 updatedBy: req.user._id,
+//                 timestamp: new Date()
+//             }]
+//         };
 
-        const shipment = await Shipment.create(shipmentData);
+//         const shipment = await Shipment.create(shipmentData);
 
-        // Update booking with shipment reference
-        booking.shipmentId = shipment._id;
-        await booking.save();
+//         // Update booking with shipment reference
+//         booking.shipmentId = shipment._id;
+//         await booking.save();
 
-        // Notify warehouse team
-        const warehouseStaff = await User.find({ 
-            role: 'warehouse', 
-            isActive: true
-        });
+//         // Notify warehouse team
+//         const warehouseStaff = await User.find({ 
+//             role: 'warehouse', 
+//             isActive: true
+//         });
 
-        if (warehouseStaff.length > 0) {
-            sendEmail({
-                to: warehouseStaff.map(w => w.email),
-                subject: '📦 New Shipment Ready for Warehouse',
-                template: 'new-shipment-warehouse',
-                data: {
-                    trackingNumber: shipment.trackingNumber,
-                    customerName: booking.sender?.name || booking.customer?.companyName || 'Customer',
-                    origin: booking.shipmentDetails?.origin,
-                    destination: booking.shipmentDetails?.destination,
-                    packages: shipment.packages.length,
-                    shipmentUrl: `${process.env.FRONTEND_URL}/warehouse/shipments/${shipment._id}`
-                }
-            }).catch(err => console.log('Warehouse email error:', err.message));
-        }
+//         if (warehouseStaff.length > 0) {
+//             sendEmail({
+//                 to: warehouseStaff.map(w => w.email),
+//                 subject: '📦 New Shipment Ready for Warehouse',
+//                 template: 'new-shipment-warehouse',
+//                 data: {
+//                     trackingNumber: shipment.trackingNumber,
+//                     customerName: booking.sender?.name || booking.customer?.companyName || 'Customer',
+//                     origin: booking.shipmentDetails?.origin,
+//                     destination: booking.shipmentDetails?.destination,
+//                     packages: shipment.packages.length,
+//                     shipmentUrl: `${process.env.FRONTEND_URL}/warehouse/shipments/${shipment._id}`
+//                 }
+//             }).catch(err => console.log('Warehouse email error:', err.message));
+//         }
 
-        res.status(201).json({
-            success: true,
-            message: 'Shipment created successfully',
-            data: shipment
-        });
+//         res.status(201).json({
+//             success: true,
+//             message: 'Shipment created successfully',
+//             data: shipment
+//         });
 
-    } catch (error) {
-        console.error('Create shipment error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
+//     } catch (error) {
+//         console.error('Create shipment error:', error);
+//         res.status(500).json({ success: false, error: error.message });
+//     }
+// };
 
 // ========== 4. UPDATE SHIPMENT ==========
 exports.updateShipment = async (req, res) => {
@@ -1496,7 +1496,7 @@ const generateShipmentNumber = async () => {
 
 // Generate tracking number (random version - recommended)
 const generateTrackingNumber = async () => {
-    const prefix = 'CLC';
+    const prefix = 'CLG';
     const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
     const numbers = '23456789';
     
@@ -1556,7 +1556,95 @@ const generateSerialTrackingNumber = async () => {
     return `CLC${formattedNumber}${nextChar}`;
 };
 // controllers/shipmentController.js - নতুন ফাংশন যোগ করুন
+// ================= CREATE SHIPMENT =================
+exports.createShipment = async (req, res) => {
+  try {
+    const {
+      bookingId,
+      customerId,
+      shipmentClassification,
+      shipmentDetails,
+      packages,
+      sender,
+      receiver
+    } = req.body;
 
+    // 🔴 BASIC VALIDATION
+    if (!bookingId || !customerId) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId and customerId are required"
+      });
+    }
+
+    if (!shipmentClassification?.mainType || !shipmentClassification?.subType) {
+      return res.status(400).json({
+        success: false,
+        message: "Shipment type is required"
+      });
+    }
+
+    if (!shipmentDetails?.origin || !shipmentDetails?.destination) {
+      return res.status(400).json({
+        success: false,
+        message: "Origin & destination required"
+      });
+    }
+
+    if (!packages || packages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one package required"
+      });
+    }
+
+    // 🔢 Generate IDs
+    const shipmentNumber = generateShipmentNumber();
+    const trackingNumber = generateTrackingNumber();
+
+    // 📦 Create Shipment
+    const shipment = await Shipment.create({
+      shipmentNumber,
+      trackingNumber,
+      bookingId,
+      customerId,
+      shipmentClassification,
+      shipmentDetails,
+      packages,
+      sender,
+      receiver,
+
+      status: "pending",
+      currentMilestone: "pending",
+
+      milestones: [
+        {
+          status: "pending",
+          location: shipmentDetails.origin,
+          description: "Shipment created",
+          updatedBy: req.user?._id
+        }
+      ],
+
+      createdBy: req.user?._id
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Shipment created successfully",
+      data: shipment
+    });
+
+  } catch (error) {
+    console.error("❌ Create Shipment Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create shipment",
+      error: error.message
+    });
+  }
+};
 // ========== UPDATE SHIPMENT TRACKING NUMBER (Booking-ও আপডেট হবে) ==========
 exports.updateShipmentTrackingNumber = async (req, res) => {
     try {

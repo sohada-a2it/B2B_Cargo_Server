@@ -23,10 +23,166 @@ setInterval(() => {
 // Generate OTP
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
+}; 
+
+// ==================== REGISTER CUSTOMER (NO OTP) ====================
+// src/controller/userController.js
+
+// src/controller/userController.js
+
+const registerWithoutOTP = async (req, res) => {
+  try {
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      role = 'customer',
+      companyName,
+      companyAddress,
+      businessType,
+      originCountries,
+      destinationMarkets,
+      provider = 'local',
+      isVerified = true,
+      status = 'active',
+      isActive = true,
+      emailVerified = true
+    } = req.body;
+
+    console.log('📝 Register request:', { firstName, lastName, email, role, provider });
+
+    // Validation
+    if (!firstName || !lastName || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'First name, last name, and email are required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await UserModel.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      console.log('⚠️ User already exists:', email);
+      return res.status(200).json({
+        success: true,
+        message: 'User already exists',
+        exists: true,
+        data: {
+          _id: existingUser._id,
+          email: existingUser.email,
+          firstName: existingUser.firstName,
+          lastName: existingUser.lastName,
+          role: existingUser.role
+        }
+      });
+    }
+
+    // Handle password - only hash if provided and provider is local
+    let hashedPassword = undefined;
+    if (provider === 'local') {
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password is required for local registration'
+        });
+      }
+      const salt = await bcrypt.genSalt(10);
+      hashedPassword = await bcrypt.hash(password, salt);
+    }
+    // For Google/Facebook auth, password remains undefined (not required in schema)
+
+    // Create user object
+    const userData = {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone || '',
+      role,
+      companyName: companyName || '',
+      companyAddress: companyAddress || '',
+      businessType: businessType || 'Trader',
+      originCountries: originCountries || ['China', 'Thailand'],
+      destinationMarkets: destinationMarkets || ['USA', 'UK', 'Canada'],
+      provider: provider,
+      isVerified: isVerified,
+      status: status,
+      isActive: isActive,
+      emailVerified: emailVerified,
+      customerSince: role === 'customer' ? new Date() : null,
+      notificationPreferences: {
+        emailNotifications: true,
+        shipmentUpdates: true,
+        invoiceNotifications: true,
+        marketingEmails: false
+      },
+      preferredCurrency: 'USD',
+      language: 'en',
+      timezone: 'UTC'
+    };
+
+    // Only add password if it exists (for local provider)
+    if (hashedPassword !== undefined) {
+      userData.password = hashedPassword;
+    }
+
+    // Add provider-specific fields
+    if (provider === 'google') {
+      userData.googleId = req.body.googleId || `google_${Date.now()}`;
+    } else if (provider === 'facebook') {
+      userData.facebookId = req.body.facebookId || `fb_${Date.now()}`;
+    }
+
+    const user = new UserModel(userData);
+    await user.save();
+
+    // Remove sensitive data
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.registrationOTP;
+    delete userResponse.registrationOTPExpires;
+    delete userResponse.resetPasswordOTP;
+    delete userResponse.resetPasswordOTPExpires;
+
+    console.log('✅ User created successfully:', userResponse._id);
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        role: user.role
+      },
+      process.env.JWT_SECRET || 'your_secret_key',
+      { expiresIn: '7d' }
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'User registered successfully',
+      token,
+      data: userResponse
+    });
+
+  } catch (error) {
+    console.error('Register error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
 };
-
-// ==================== CUSTOMER REGISTRATION (Only for customers) ====================
-
 const registerCustomerAndSendOTP = async (req, res) => {
   try {
     const { 
@@ -1305,6 +1461,7 @@ const getUsersByRole = async (req, res) => {
 
 module.exports = {
   // Customer Registration (OTP Based - No DB save until verification)
+  registerWithoutOTP,
   registerCustomerAndSendOTP,
   verifyCustomerOTP,
   resendOTP,

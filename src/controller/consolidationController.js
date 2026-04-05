@@ -947,8 +947,9 @@ exports.updateConsolidationStatus = async (req, res) => {
         'loaded': ['dispatched', 'cancelled', 'on_hold'],
         'dispatched': ['in_transit', 'cancelled'],
         'in_transit': ['arrived', 'cancelled'],
-        'arrived': ['customs_cleared', 'cancelled'],
-        'customs_cleared': ['out_for_delivery'],
+        'arrived': ['under_customs_cleared', 'customs_cleared', 'cancelled'],  // ← under_customs_cleared যোগ করুন
+  'under_customs_cleared': ['customs_cleared', 'cancelled'],  // ← নতুন স্ট্যাটাস যোগ করুন
+  'customs_cleared': ['out_for_delivery', 'cancelled'],
         'out_for_delivery': ['delivered'],
         'delivered': ['completed'],
         'on_hold': ['in_progress', 'cancelled'],

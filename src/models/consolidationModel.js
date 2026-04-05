@@ -105,7 +105,8 @@ const consolidationSchema = new mongoose.Schema({
             'dispatched',         // ডিসপ্যাচ করা হয়েছে
             'in_transit',         // ট্রানজিটে
             'departed',           // পোর্ট ছেড়েছে
-            'arrived',            // পৌঁছেছে
+            'arrived', 
+            'under_customs_cleared',           // পৌঁছেছে
             'customs_cleared',    // কাস্টমস ক্লিয়ারেন্স সম্পন্ন (নতুন)
             'out_for_delivery',   // ডেলিভারির জন্য বের হয়েছে (নতুন)
             'delivered',          // ডেলিভারি সম্পন্ন (নতুন)
@@ -120,7 +121,7 @@ const consolidationSchema = new mongoose.Schema({
             type: String,
             enum: [
                 'draft', 'in_progress', 'consolidated', 'ready_for_dispatch',
-                'loaded', 'dispatched', 'in_transit', 'departed', 'arrived',
+                'loaded', 'dispatched', 'in_transit', 'departed', 'arrived','under_customs_cleared',
                 'customs_cleared', 'out_for_delivery', 'delivered', 'completed','cancelled', 'on_hold',                   // ✅ Shipment cancelled
                 'shipment_cancelled',           // ✅ Individual shipment cancelled
                 'shipment_on_hold',             // ✅ Individual shipment on hold

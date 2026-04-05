@@ -68,7 +68,18 @@ const bookingStatuses = [
     'price_quoted',
     'booking_confirmed',
     'cancelled',
-    'rejected'
+    'rejected',
+    'pending',
+    'picked_up_from_warehouse',
+    'departed_port_of_origin',
+    'in_transit_sea_freight',
+    'arrived_at_destination_port',
+    'customs_cleared',
+    'out_for_delivery',
+    'delivered',
+    'on_hold',
+    'cancelled',
+    'returned'
 ];
 
 // Courier Service Types

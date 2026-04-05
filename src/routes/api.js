@@ -11,6 +11,37 @@ const trackingController = require('../controller/trackingController');
 const damageReportController = require('../controller/damageController');
 const { body } = require('express-validator');
 // ==================== PUBLIC ROUTES (No Authentication Needed) ==================== 
+router.get('/find-by-email', async (req, res) => {
+  try {
+    const { email } = req.query;
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    if (user) {
+      res.json({
+        success: true,
+        exists: true,
+        userId: user._id,
+        user: {
+          _id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        exists: false
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+router.post("/register", userController.registerWithoutOTP);
 router.post("/login", userController.loginUser);  
 router.post("/customer/register", userController.registerCustomerAndSendOTP);  
 router.post("/customer/verify-otp", userController.verifyCustomerOTP); 
@@ -164,6 +195,7 @@ router.post(
 // shipment
 // ==================== PUBLIC ROUTES ==================== 
 // ========== PUBLIC TRACKING (No Auth Required) ==========
+router.post("/create-shipments", protect, shipmentController.createShipment);
 router.get('/getAllShipment',protect,  adminOnly, shipmentController.getAllShipments); 
 router.get('/shipments/track/:trackingNumber',protect, shipmentController.trackByNumber); 
 
