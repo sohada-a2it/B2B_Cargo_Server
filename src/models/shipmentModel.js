@@ -254,14 +254,14 @@ const shipmentSchema = new mongoose.Schema({
     bookingId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Booking',
-        required: true
+        // required: true
     },
     
     // ===== Relationships =====
     customerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        // required: true
     },
     
     // ===== Shipment Classification =====

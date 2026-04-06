@@ -4,6 +4,7 @@ const userController = require("../controller/userController");
 const { protect, adminOnly } = require("../middleware/AuthVerifyMiddleWare"); 
 const bookingController = require('../controller/bookingController');
 const shipmentController = require('../controller/shipmentController');
+const newShipmentController = require('../controller/newShipmentController');
 const returnController = require('../controller/returnController');
 const warehouseController = require('../controller/warehouseController');
 const consolidationController = require('../controller/consolidationController');
@@ -193,11 +194,19 @@ router.post(
     bookingController.bulkUpdateInvoices
 ); 
 // shipment
-// ==================== PUBLIC ROUTES ==================== 
+// ==================== PUBLIC ROUTES ====================  
 // ========== PUBLIC TRACKING (No Auth Required) ==========
-router.post("/create-shipments", protect, shipmentController.createShipment);
+router.post("/create-shipments", protect, newShipmentController.createShipment);
+router.get("/getNewShipment", protect,adminOnly, newShipmentController.getAllNewShipments);
 router.get('/getAllShipment',protect,  adminOnly, shipmentController.getAllShipments); 
 router.get('/shipments/track/:trackingNumber',protect, shipmentController.trackByNumber); 
+// manual shipping
+// Customer shipment routes (protected) 
+router.get('/my-new-shipments', protect, newShipmentController.getMyShipments);
+router.get('/my-shipments/summary', protect,  newShipmentController.getMyShipmentSummary);
+router.get('/my-shipments/:id', protect,  newShipmentController.getMyShipmentById);
+router.get('/my-shipments/:id/tracking', protect,  newShipmentController.getMyShipmentTracking);
+// router.post('/my-shipments/:id/return-request', protect,  newShipmentController.requestReturn);
 
 // ========== CUSTOMER ROUTES ==========
 router.get('/my-shipments',protect,  shipmentController.getMyShipments); 

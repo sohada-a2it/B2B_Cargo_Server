@@ -1559,8 +1559,7 @@ const generateSerialTrackingNumber = async () => {
 // ================= CREATE SHIPMENT =================
 exports.createShipment = async (req, res) => {
   try {
-    const {
-      bookingId,
+    const { 
       customerId,
       shipmentClassification,
       shipmentDetails,
@@ -1570,12 +1569,12 @@ exports.createShipment = async (req, res) => {
     } = req.body;
 
     // 🔴 BASIC VALIDATION
-    if (!bookingId || !customerId) {
-      return res.status(400).json({
-        success: false,
-        message: "bookingId and customerId are required"
-      });
-    }
+    // if (!bookingId || !customerId) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "bookingId and customerId are required"
+    //   });
+    // }
 
     if (!shipmentClassification?.mainType || !shipmentClassification?.subType) {
       return res.status(400).json({
@@ -1599,8 +1598,8 @@ exports.createShipment = async (req, res) => {
     }
 
     // 🔢 Generate IDs
-    const shipmentNumber = generateShipmentNumber();
-    const trackingNumber = generateTrackingNumber();
+   const shipmentNumber = await generateShipmentNumber();
+    const trackingNumber = await generateTrackingNumber();
 
     // 📦 Create Shipment
     const shipment = await Shipment.create({
