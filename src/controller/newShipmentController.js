@@ -279,22 +279,28 @@ exports.getMyShipments = async (req, res) => {
   try {
     const { page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'desc', search, status, startDate, endDate } = req.query;
 
-    // Build query for customer's shipments
-    let query = { customerId: req.user._id };
-    
+    // Build query for customer's shipments including null customerId
+    let query = {
+      $or: [
+        { customerId: req.user._id },
+        { 'sender.email': req.user.email },
+        { 'receiver.email': req.user.email }
+      ]
+    };
+
     // Add search filter
     if (search) {
-      query.$or = [
+      query.$or.push(
         { shipmentNumber: { $regex: search, $options: 'i' } },
         { trackingNumber: { $regex: search, $options: 'i' } }
-      ];
+      );
     }
-    
+
     // Add status filter
     if (status && status !== 'all') {
       query.shipmentStatus = status;
     }
-    
+
     // Add date range filter
     if (startDate || endDate) {
       query.createdAt = {};

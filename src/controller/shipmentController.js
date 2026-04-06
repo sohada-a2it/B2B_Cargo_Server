@@ -1561,18 +1561,29 @@ exports.createShipment = async (req, res) => {
   try {
     const { 
       customerId,
+      bookingId,  // ← এই লাইনটি আনকমেন্ট করুন
+      trackingNumber: frontendTrackingNumber,  // ← ফ্রন্টএন্ড থেকে পাঠানো trackingNumber
       shipmentClassification,
       shipmentDetails,
       packages,
       sender,
-      receiver
+      receiver,
+      serviceType,
+      dates,
+      quotedPrice,
+      payment,
+      courier,
+      status,
+      shipmentStatus,
+      timeline,
+      createdBy
     } = req.body;
 
-    // 🔴 BASIC VALIDATION
-    // if (!bookingId || !customerId) {
+    // 🔴 VALIDATION
+    // if (!customerId && !req.body.customerId) {
     //   return res.status(400).json({
     //     success: false,
-    //     message: "bookingId and customerId are required"
+    //     message: "customerId is required"
     //   });
     // }
 
@@ -1597,46 +1608,233 @@ exports.createShipment = async (req, res) => {
       });
     }
 
-    // 🔢 Generate IDs
-   const shipmentNumber = await generateShipmentNumber();
-    const trackingNumber = await generateTrackingNumber();
+    // 🔢 Generate or use provided tracking number
+    let trackingNumber;
+    let shipmentNumber;
+    
+    // Use tracking number from frontend if provided, otherwise generate new
+    if (frontendTrackingNumber) {
+      // Check if tracking number already exists
+      const existingShipment = await Shipment.findOne({ trackingNumber: frontendTrackingNumber });
+      if (existingShipment) {
+        return res.status(400).json({
+          success: false,
+          message: `Tracking number ${frontendTrackingNumber} already exists`
+        });
+      }
+      trackingNumber = frontendTrackingNumber.toUpperCase();
+      console.log(`✅ Using provided tracking number: ${trackingNumber}`);
+    } else {
+      trackingNumber = await generateTrackingNumber();
+      console.log(`✅ Generated new tracking number: ${trackingNumber}`);
+    }
+    
+    // Generate shipment number
+    shipmentNumber = await generateShipmentNumber();
 
-    // 📦 Create Shipment
-    const shipment = await Shipment.create({
+    // Calculate package totals
+    let totalPackages = 0;
+    let totalWeight = 0;
+    let totalVolume = 0;
+    
+    packages.forEach(pkg => {
+      const quantity = Number(pkg.quantity) || 1;
+      totalPackages += quantity;
+      totalWeight += (Number(pkg.weight) || 0) * quantity;
+      totalVolume += (Number(pkg.volume) || 0) * quantity;
+    });
+
+    // Prepare milestone from timeline or create default
+    let milestones = [];
+    
+    if (timeline && timeline.length > 0) {
+      milestones = timeline.map(entry => ({
+        status: entry.status,
+        location: entry.metadata?.location || shipmentDetails.origin,
+        description: entry.description,
+        updatedBy: entry.updatedBy || req.user?._id || createdBy,
+        timestamp: entry.timestamp || new Date()
+      }));
+    } else {
+      milestones = [{
+        status: status || 'pending',
+        location: shipmentDetails.origin,
+        description: 'Shipment created',
+        updatedBy: req.user?._id || createdBy,
+        timestamp: new Date()
+      }];
+    }
+
+    // 📦 Create Shipment with complete data
+    const shipmentData = {
       shipmentNumber,
       trackingNumber,
-      bookingId,
-      customerId,
-      shipmentClassification,
-      shipmentDetails,
-      packages,
-      sender,
-      receiver,
+      bookingId: bookingId || null,
+      customerId: customerId || req.body.customerId,
+      
+      // Shipment classification
+      shipmentClassification: {
+        mainType: shipmentClassification.mainType,
+        subType: shipmentClassification.subType
+      },
+      
+      // Shipment details
+      shipmentDetails: {
+        origin: shipmentDetails.origin,
+        destination: shipmentDetails.destination,
+        shippingMode: shipmentDetails.shippingMode || 'DDU',
+        totalPackages,
+        totalWeight,
+        totalVolume,
+        specialInstructions: shipmentDetails.specialInstructions || '',
+        referenceNumber: shipmentDetails.referenceNumber || ''
+      },
+      
+      // Packages
+      packages: packages.map(pkg => ({
+        description: pkg.description,
+        packagingType: pkg.packagingType || 'carton',
+        quantity: Number(pkg.quantity),
+        weight: Number(pkg.weight),
+        volume: Number(pkg.volume),
+        dimensions: pkg.dimensions || { length: 0, width: 0, height: 0, unit: 'cm' },
+        productCategory: pkg.productCategory || 'Others',
+        hsCode: pkg.hsCode || '',
+        value: {
+          amount: Number(pkg.value?.amount) || 0,
+          currency: pkg.value?.currency || 'USD'
+        },
+        hazardous: pkg.hazardous || false,
+        temperatureControlled: pkg.temperatureControlled || { required: false }
+      })),
+      
+      // Sender info
+      sender: {
+        name: sender?.name || '',
+        companyName: sender?.companyName || '',
+        email: sender?.email || '',
+        phone: sender?.phone || '',
+        address: {
+          addressLine1: sender?.address?.addressLine1 || '',
+          addressLine2: sender?.address?.addressLine2 || '',
+          city: sender?.address?.city || '',
+          state: sender?.address?.state || '',
+          country: sender?.address?.country || '',
+          postalCode: sender?.address?.postalCode || ''
+        },
+        pickupDate: sender?.pickupDate || null,
+        pickupInstructions: sender?.pickupInstructions || ''
+      },
+      
+      // Receiver info
+      receiver: {
+        name: receiver?.name || '',
+        companyName: receiver?.companyName || '',
+        email: receiver?.email || '',
+        phone: receiver?.phone || '',
+        address: {
+          addressLine1: receiver?.address?.addressLine1 || '',
+          addressLine2: receiver?.address?.addressLine2 || '',
+          city: receiver?.address?.city || '',
+          state: receiver?.address?.state || '',
+          country: receiver?.address?.country || '',
+          postalCode: receiver?.address?.postalCode || ''
+        },
+        deliveryInstructions: receiver?.deliveryInstructions || '',
+        isResidential: receiver?.isResidential || false
+      },
+      
+      // Courier info
+      courier: {
+        company: courier?.company || 'Cargo Logistics Group',
+        serviceType: serviceType || courier?.serviceType || 'standard'
+      },
+      
+      // Dates
+      dates: {
+        estimatedDeparture: dates?.estimatedDeparture || null,
+        estimatedArrival: dates?.estimatedArrival || null,
+        created: new Date()
+      },
+      
+      // Pricing
+      quotedPrice: quotedPrice ? {
+        amount: Number(quotedPrice.amount),
+        currency: quotedPrice.currency || 'USD',
+        breakdown: quotedPrice.breakdown || {},
+        notes: quotedPrice.notes || '',
+        quotedBy: quotedPrice.quotedBy || req.user?._id,
+        quotedAt: quotedPrice.quotedAt || new Date(),
+        validUntil: quotedPrice.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      } : null,
+      
+      // Payment
+      payment: payment ? {
+        mode: payment.mode || 'bank_transfer',
+        currency: payment.currency || 'USD',
+        amount: Number(payment.amount) || 0,
+        status: 'pending'
+      } : null,
+      
+      // Status
+      status: status || 'pending',
+      shipmentStatus: shipmentStatus || 'pending',
+      
+      // Milestones/Timeline
+      milestones: milestones,
+      
+      // Metadata
+      createdBy: req.user?._id || createdBy || customerId,
+      
+      // Service type
+      serviceType: serviceType || 'standard'
+    };
 
-      status: "pending",
-      currentMilestone: "pending",
+    console.log('📦 Creating shipment with tracking:', shipmentData.trackingNumber);
+    console.log('📦 Package count:', shipmentData.packages.length);
+    console.log('📦 Total weight:', shipmentData.shipmentDetails.totalWeight);
 
-      milestones: [
-        {
-          status: "pending",
-          location: shipmentDetails.origin,
-          description: "Shipment created",
-          updatedBy: req.user?._id
-        }
-      ],
+    const shipment = await Shipment.create(shipmentData);
 
-      createdBy: req.user?._id
-    });
+    // Update booking with shipment ID if bookingId exists
+    if (bookingId) {
+      try {
+        await Booking.findByIdAndUpdate(bookingId, {
+          shipmentId: shipment._id,
+          status: 'booking_confirmed',
+          trackingNumber: shipment.trackingNumber
+        });
+        console.log(`✅ Updated booking ${bookingId} with shipment ID`);
+      } catch (bookingError) {
+        console.warn('Could not update booking:', bookingError.message);
+      }
+    }
 
     res.status(201).json({
       success: true,
       message: "Shipment created successfully",
-      data: shipment
+      data: {
+        _id: shipment._id,
+        shipmentNumber: shipment.shipmentNumber,
+        trackingNumber: shipment.trackingNumber,
+        status: shipment.status,
+        totalPackages: shipment.shipmentDetails.totalPackages,
+        totalWeight: shipment.shipmentDetails.totalWeight
+      }
     });
 
   } catch (error) {
     console.error("❌ Create Shipment Error:", error);
-
+    
+    // Check for duplicate tracking number error
+    if (error.code === 11000 && error.keyPattern?.trackingNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Tracking number already exists. Please generate a new one.",
+        error: "Duplicate tracking number"
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: "Failed to create shipment",

@@ -8,6 +8,7 @@ const { sendEmail } = require('../utils/emailService');
 const { generateTrackingNumber } = require('../utils/trackingGenerator');
 const mongoose = require('mongoose');
 const { generateInvoicePDFBuffer } = require('../service/pdfGenerator'); 
+const NewShipment  = require('../models/newShipmentModel');
 // ========== HELPER FUNCTIONS ==========
 // ==================== মিসিং হেল্পার ফাংশনগুলো ====================
 // এই ফাংশনগুলো আপনার ফাইলের একদম উপরে, অন্যান্য হেল্পার ফাংশনের পরে যোগ করুন
@@ -2399,291 +2400,288 @@ const calculateTotals = (charges, taxRate, discountAmount) => {
     return { subtotal, taxAmount, totalAmount };
 };
 // ========== 14. TRACK BY NUMBER (Public) ==========
+// controllers/bookingController.js - trackByNumber ফাংশন আপডেট করুন
+
 exports.trackByNumber = async (req, res) => {
-    try {
-        const { trackingNumber } = req.params;
-
-        console.log('🔍 Tracking search:', trackingNumber);
-
-        // Shipment খুঁজুন
-        let shipment = await Shipment.findOne({ trackingNumber })
-            .populate({
-                path: 'bookingId',
-                select: 'bookingNumber sender receiver dates shipmentDetails packageDetails'
-            })
-            .populate('customerId', 'companyName firstName lastName')
-            .populate({
-                path: 'consolidationId',
-                select: 'consolidationNumber containerNumber vesselName voyageNumber originWarehouse destinationPort timeline packageDetails'
-            })
-            .lean();
-
-        let packages = []; // Initialize packages array
-
-        // Shipment না পেলে Booking এ খুঁজুন
-        if (!shipment) {
-            const booking = await Booking.findOne({ trackingNumber })
-                .populate('customer', 'companyName firstName lastName')
-                .populate('shipmentId')
-                .lean();
-
-            if (booking) {
-                // Extract packages from booking
-                if (booking.packageDetails && booking.packageDetails.length > 0) {
-                    packages = booking.packageDetails;
-                } else if (booking.shipmentDetails?.packageDetails) {
-                    packages = booking.shipmentDetails.packageDetails;
-                }
-                
-                shipment = {
-                    ...booking,
-                    type: 'booking',
-                    trackingNumber: booking.trackingNumber,
-                    packages: packages,
-                    milestones: booking.timeline || []
-                };
-            }
-        } else {
-            // Extract packages from shipment
-            if (shipment.packageDetails && shipment.packageDetails.length > 0) {
-                packages = shipment.packageDetails;
-            } else if (shipment.bookingId?.packageDetails && shipment.bookingId.packageDetails.length > 0) {
-                packages = shipment.bookingId.packageDetails;
-            } else if (shipment.shipmentDetails?.packageDetails && shipment.shipmentDetails.packageDetails.length > 0) {
-                packages = shipment.shipmentDetails.packageDetails;
-            } else if (shipment.consolidationId?.packageDetails && shipment.consolidationId.packageDetails.length > 0) {
-                packages = shipment.consolidationId.packageDetails;
-            }
-            
-            // If still no packages, create a default package from shipment info
-            if (packages.length === 0 && shipment.shipmentDetails) {
-                packages = [{
-                    packageNumber: shipment.shipmentNumber || shipment.trackingNumber,
-                    description: shipment.shipmentDetails.goodsDescription || 'General Cargo',
-                    quantity: shipment.shipmentDetails.totalPackages || 1,
-                    weight: shipment.shipmentDetails.totalWeight || 0,
-                    volume: shipment.shipmentDetails.totalVolume || 0,
-                    dimensions: shipment.shipmentDetails.dimensions,
-                    type: shipment.shipmentDetails.packageType || 'Carton'
-                }];
-            }
-        }
-
-        if (!shipment) {
-            return res.status(404).json({
-                success: false,
-                message: 'Tracking number not found'
-            });
-        }
-
-        // ===== টাইমলাইন তৈরি করুন - China Warehouse বাদ দিয়ে =====
-        let timeline = [];
-
-        // 1. শিপমেন্ট মাইলস্টোন
-        if (shipment.milestones && shipment.milestones.length > 0) {
-            const shipmentEvents = shipment.milestones.map(m => ({
-                status: m.status,
-                location: getLocationForStatus(m.status, m.location, shipment),
-                description: m.description || getStatusDescription(m.status),
-                date: m.timestamp,
-                formattedDate: formatDate(m.timestamp),
-                source: 'shipment'
-            }));
-            timeline = [...timeline, ...shipmentEvents];
-        }
-
-        // 2. কনসলিডেশন ইভেন্ট (যদি থাকে)
-        if (shipment.consolidationId && shipment.consolidationId.timeline) {
-            const consolidationEvents = shipment.consolidationId.timeline.map(event => ({
-                status: event.status,
-                location: getConsolidationLocation(event, shipment),
-                description: event.description || `Consolidation: ${event.status}`,
-                date: event.timestamp,
-                formattedDate: formatDate(event.timestamp),
-                source: 'consolidation'
-            }));
-            timeline = [...timeline, ...consolidationEvents];
-        }
-
-        // 3. ট্র্যাকিং আপডেট
-        if (shipment.trackingUpdates && shipment.trackingUpdates.length > 0) {
-            const trackingEvents = shipment.trackingUpdates.map(t => ({
-                status: t.status,
-                location: getLocationForStatus(t.status, t.location, shipment),
-                description: t.description || 'Tracking update',
-                date: t.timestamp,
-                formattedDate: formatDate(t.timestamp),
-                source: 'tracking'
-            }));
-            timeline = [...timeline, ...trackingEvents];
-        }
-
-        // 4. টাইমলাইন সাজান (তারিখ অনুযায়ী)
-        timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-        // 5. ডুপ্লিকেট রিমুভ
-        const uniqueTimeline = [];
-        const seen = new Set();
-        
-        timeline.forEach(event => {
-            const key = `${event.status}-${new Date(event.date).toDateString()}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                uniqueTimeline.push(event);
-            }
-        });
-
-        // 6. বর্তমান লোকেশন নির্ধারণ (সবচেয়ে সাম্প্রতিক ইভেন্ট থেকে)
-        let currentLocation = 'Location Unknown';
-        
-        if (uniqueTimeline.length > 0) {
-            const latestEvent = uniqueTimeline[0];
-            
-            // In Transit চেক
-            if (latestEvent.status.includes('transit')) {
-                if (shipment.consolidationId?.vesselName) {
-                    currentLocation = `In Transit - ${shipment.consolidationId.vesselName}`;
-                } else {
-                    currentLocation = `In Transit to ${shipment.shipmentDetails?.destination || 'Destination'}`;
-                }
-            } 
-            // Arrived চেক
-            else if (latestEvent.status.includes('arrive')) {
-                currentLocation = shipment.shipmentDetails?.destination || 'Destination Port';
-            }
-            // Customs চেক
-            else if (latestEvent.status.includes('customs')) {
-                currentLocation = 'Customs Clearance';
-            }
-            // Out for Delivery চেক
-            else if (latestEvent.status.includes('out_for_delivery')) {
-                currentLocation = shipment.shipmentDetails?.destination || 'Out for Delivery';
-            }
-            // Delivered চেক
-            else if (latestEvent.status.includes('delivered')) {
-                currentLocation = 'Delivered';
-            }
-            // অন্য কোনো লোকেশন
-            else {
-                currentLocation = latestEvent.location;
-            }
-        }
-
-        // China Warehouse ফিল্টার - যদি এখনও থেকে যায়
-        if (currentLocation === 'China Warehouse' || currentLocation === 'Warehouse') {
-            if (shipment.status.includes('transit')) {
-                currentLocation = 'In Transit to Destination';
-            } else if (shipment.status.includes('delivered')) {
-                currentLocation = 'Delivered';
-            } else {
-                currentLocation = 'Origin Facility';
-            }
-        }
-
-        // Calculate total weight and volume from packages
-        let totalWeight = 0;
-        let totalVolume = 0;
-        
-        packages.forEach(pkg => {
-            totalWeight += (pkg.weight || 0);
-            totalVolume += (pkg.volume || 0);
-        });
-
-        // ===== ফাইনাল রেসপন্স =====
-        const trackingInfo = {
-            trackingNumber: shipment.trackingNumber,
-            bookingNumber: shipment.bookingId?.bookingNumber || shipment.bookingNumber,
-            shipmentNumber: shipment.shipmentNumber,
-            
-            status: shipment.status,
-            statusDisplay: formatStatus(shipment.status),
-            progress: calculateProgress(shipment.status),
-            
-            // গুরুত্বপূর্ণ: এখানে China Warehouse আসবে না
-            currentLocation: currentLocation,
-            
-            origin: shipment.shipmentDetails?.origin || shipment.origin || 'China',
-            destination: shipment.shipmentDetails?.destination || shipment.destination || 'USA',
-            
-            estimatedDeparture: shipment.dates?.estimatedDeparture || shipment.estimatedDeparture,
-            estimatedDepartureFormatted: formatDate(shipment.dates?.estimatedDeparture || shipment.estimatedDeparture),
-            
-            estimatedArrival: shipment.dates?.estimatedArrival || shipment.estimatedArrival,
-            estimatedArrivalFormatted: formatDate(shipment.dates?.estimatedArrival || shipment.estimatedArrival),
-            
-            actualDelivery: shipment.dates?.delivered || shipment.actualDelivery,
-            actualDeliveryFormatted: formatDate(shipment.dates?.delivered || shipment.actualDelivery),
-            
-            lastUpdate: uniqueTimeline[0]?.date || shipment.updatedAt,
-            lastUpdateFormatted: formatDate(uniqueTimeline[0]?.date || shipment.updatedAt),
-            
-            // PACKAGE DETAILS - ADDED HERE
-            packages: packages,
-            
-            // Package summary
-            totalPackages: packages.length,
-            totalWeight: totalWeight,
-            totalVolume: totalVolume,
-            
-            // কনসলিডেশন তথ্য
-            consolidation: shipment.consolidationId ? {
-                number: shipment.consolidationId.consolidationNumber,
-                containerNumber: shipment.consolidationId.containerNumber,
-                vesselName: shipment.consolidationId.vesselName,
-                voyageNumber: shipment.consolidationId.voyageNumber,
-                originWarehouse: shipment.consolidationId.originWarehouse,
-                destinationPort: shipment.consolidationId.destinationPort,
-                packages: packages // Also include packages in consolidation if needed
-            } : null,
-            
-            // Shipment details with package info
-            shipmentDetails: {
-                totalPackages: packages.length,
-                totalWeight: totalWeight,
-                totalVolume: totalVolume,
-                shippingMode: shipment.shippingMode || shipment.shipmentDetails?.shippingMode || 'DDU',
-                serviceType: shipment.serviceType || shipment.shipmentDetails?.serviceType || 'standard',
-                origin: shipment.shipmentDetails?.origin || shipment.origin || 'China',
-                destination: shipment.shipmentDetails?.destination || shipment.destination || 'USA',
-                notes: shipment.notes || shipment.shipmentDetails?.notes,
-                packages: packages // Include packages here too for compatibility
-            },
-            
-            // টাইমলাইন (China Warehouse ছাড়া)
-            timeline: uniqueTimeline.slice(0, 30),
-            
-            // সেন্ডার/রিসিভার
-            sender: shipment.sender || shipment.bookingId?.sender || {
-                name: shipment.customerId?.companyName || shipment.customerId?.firstName + ' ' + shipment.customerId?.lastName,
-                email: shipment.customerId?.email,
-                phone: shipment.customerId?.phone
-            },
-            receiver: shipment.receiver || shipment.bookingId?.receiver
-        };
-
-        // ডিবাগ লগ
-        console.log('✅ Tracking Info:', {
-            tracking: trackingInfo.trackingNumber,
-            status: trackingInfo.status,
-            location: trackingInfo.currentLocation,
-            packagesCount: trackingInfo.packages.length,
-            timelineCount: trackingInfo.timeline.length
-        });
-
-        console.log('📦 Package details:', JSON.stringify(packages, null, 2));
-
-        res.status(200).json({
-            success: true,
-            data: trackingInfo
-        });
-
-    } catch (error) {
-        console.error('❌ Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
-        });
+  try {
+    let { trackingNumber } = req.params;
+    
+    // Clean tracking number
+    trackingNumber = trackingNumber.trim().toUpperCase();
+    
+    console.log('🔍 ===== TRACKING SEARCH STARTED =====');
+    console.log('📦 Searching for tracking number:', trackingNumber);
+    
+    let shipmentData = null;
+    let source = null;
+    
+    // 1️⃣ First check in NewShipment model (এইটা এখন সবচেয়ে গুরুত্বপূর্ণ)
+    console.log('🔍 Searching in NewShipment model...');
+    
+    let newShipment = await NewShipment.findOne({ 
+      trackingNumber: { $regex: new RegExp(`^${trackingNumber}$`, 'i') }
+    })
+    .populate('customerId', 'firstName lastName companyName email phone')
+    .populate('createdBy', 'firstName lastName email')
+    .lean();
+    
+    if (newShipment) {
+      source = 'new_shipment';
+      shipmentData = newShipment;
+      console.log('✅ Found in NewShipment model!');
+      console.log('Shipment status:', newShipment.status);
+      console.log('Tracking number:', newShipment.trackingNumber);
     }
+    
+    // 2️⃣ Check in old Shipment model (backward compatibility)
+    if (!shipmentData) {
+      console.log('🔍 Searching in old Shipment model...');
+      let oldShipment = await Shipment.findOne({ 
+        trackingNumber: { $regex: new RegExp(`^${trackingNumber}$`, 'i') }
+      })
+      .populate('customerId', 'firstName lastName companyName email')
+      .populate('bookingId', 'bookingNumber sender receiver dates')
+      .lean();
+      
+      if (oldShipment) {
+        source = 'shipment';
+        shipmentData = oldShipment;
+        console.log('✅ Found in old Shipment model');
+      }
+    }
+    
+    // 3️⃣ Check in Booking model
+    if (!shipmentData) {
+      console.log('🔍 Searching in Booking model...');
+      const booking = await Booking.findOne({ 
+        trackingNumber: { $regex: new RegExp(`^${trackingNumber}$`, 'i') }
+      }).lean();
+      
+      if (booking) {
+        source = 'booking';
+        shipmentData = {
+          trackingNumber: booking.trackingNumber,
+          bookingNumber: booking.bookingNumber,
+          status: booking.status,
+          shipmentDetails: booking.shipmentDetails,
+          packages: booking.packageDetails || booking.shipmentDetails?.packageDetails || [],
+          sender: booking.sender,
+          receiver: booking.receiver,
+          dates: booking.dates,
+          timeline: booking.timeline || [],
+          createdAt: booking.createdAt,
+          updatedAt: booking.updatedAt
+        };
+        console.log('✅ Found in Booking model');
+      }
+    }
+    
+    // 4️⃣ Check in ManualShipment model
+    if (!shipmentData) {
+      console.log('🔍 Searching in ManualShipment model...');
+      const manualShipment = await ManualShipment.findOne({ 
+        trackingNumber: { $regex: new RegExp(`^${trackingNumber}$`, 'i') }
+      }).lean();
+      
+      if (manualShipment) {
+        source = 'manual';
+        console.log('✅ Found in ManualShipment model');
+        
+        shipmentData = {
+          trackingNumber: manualShipment.trackingNumber,
+          bookingNumber: manualShipment.bookingNumber || manualShipment._id.toString(),
+          status: manualShipment.status || 'pending',
+          shipmentDetails: {
+            origin: manualShipment.origin || 'China',
+            destination: manualShipment.destination || 'USA',
+            shippingMode: manualShipment.shipmentDetails?.shippingMode || 'DDU',
+            totalPackages: manualShipment.packageDetails?.length || 0,
+            totalWeight: manualShipment.shipmentDetails?.totalWeight || 0,
+            totalVolume: manualShipment.shipmentDetails?.totalVolume || 0
+          },
+          packages: manualShipment.packageDetails || [],
+          sender: manualShipment.sender || {
+            name: manualShipment.customerName || 'Manual Shipment',
+            email: manualShipment.email || '',
+            phone: manualShipment.phone || ''
+          },
+          receiver: manualShipment.receiver || {},
+          dates: manualShipment.dates || {},
+          timeline: manualShipment.timeline || manualShipment.trackingUpdates || [],
+          createdAt: manualShipment.createdAt,
+          updatedAt: manualShipment.updatedAt
+        };
+      }
+    }
+    
+    // If not found anywhere
+    if (!shipmentData) {
+      console.log('❌ Tracking number not found in any model');
+      
+      // Debug: Show sample tracking numbers from NewShipment
+      const sampleShipments = await NewShipment.find({}, 'trackingNumber').limit(5);
+      console.log('Sample tracking numbers in NewShipment:', sampleShipments.map(s => s.trackingNumber));
+      
+      return res.status(404).json({
+        success: false,
+        message: `Tracking number "${trackingNumber}" not found`,
+        debug: {
+          searchedNumber: trackingNumber,
+          modelsChecked: ['NewShipment', 'Shipment', 'Booking', 'ManualShipment'],
+          sampleTrackingNumbers: sampleShipments.map(s => s.trackingNumber)
+        }
+      });
+    }
+    
+    // Process timeline from shipment data
+    let timeline = [];
+    
+    if (shipmentData.timeline && shipmentData.timeline.length > 0) {
+      timeline = shipmentData.timeline.map(item => ({
+        status: item.status,
+        description: item.description || getStatusDescription(item.status),
+        location: item.location || getDefaultLocationForStatus(item.status, shipmentData),
+        date: item.timestamp,
+        formattedDate: formatDate(item.timestamp)
+      }));
+    } else if (shipmentData.milestones && shipmentData.milestones.length > 0) {
+      timeline = shipmentData.milestones.map(item => ({
+        status: item.status,
+        description: item.description || getStatusDescription(item.status),
+        location: item.location || getDefaultLocationForStatus(item.status, shipmentData),
+        date: item.timestamp,
+        formattedDate: formatDate(item.timestamp)
+      }));
+    }
+    
+    // Sort timeline by date (newest first)
+    timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    // If no timeline, create default
+    if (timeline.length === 0) {
+      timeline.push({
+        status: shipmentData.status || 'pending',
+        description: 'Shipment created',
+        location: shipmentData.shipmentDetails?.origin || 'Origin',
+        date: shipmentData.createdAt || new Date(),
+        formattedDate: formatDate(shipmentData.createdAt)
+      });
+    }
+    
+    // Calculate totals
+    let totalWeight = 0;
+    let totalVolume = 0;
+    
+    const packages = shipmentData.packages || shipmentData.shipmentDetails?.packageDetails || [];
+    
+    if (packages.length > 0) {
+      packages.forEach(pkg => {
+        const qty = pkg.quantity || 1;
+        totalWeight += (pkg.weight || 0) * qty;
+        totalVolume += (pkg.volume || 0) * qty;
+      });
+    } else if (shipmentData.shipmentDetails?.totalWeight) {
+      totalWeight = shipmentData.shipmentDetails.totalWeight;
+      totalVolume = shipmentData.shipmentDetails.totalVolume || 0;
+    }
+    
+    // Get current location
+    let currentLocation = 'Processing';
+    if (timeline.length > 0) {
+      const latestEvent = timeline[0];
+      if (latestEvent.location && latestEvent.location !== 'Unknown') {
+        currentLocation = latestEvent.location;
+      } else if (latestEvent.status === 'delivered') {
+        currentLocation = shipmentData.shipmentDetails?.destination || 'Delivered';
+      } else if (latestEvent.status.includes('transit')) {
+        currentLocation = 'In Transit';
+      } else {
+        currentLocation = latestEvent.location || 'In Progress';
+      }
+    }
+    
+    // Prepare response
+    const trackingInfo = {
+      trackingNumber: shipmentData.trackingNumber,
+      bookingNumber: shipmentData.bookingNumber || shipmentData._id,
+      shipmentNumber: shipmentData.shipmentNumber,
+      
+      status: shipmentData.status || shipmentData.shipmentStatus || 'pending',
+      statusDisplay: formatStatus(shipmentData.status || shipmentData.shipmentStatus),
+      progress: calculateProgress(shipmentData.status || shipmentData.shipmentStatus, timeline),
+      
+      currentLocation: currentLocation,
+      
+      origin: shipmentData.shipmentDetails?.origin || 'China',
+      destination: shipmentData.shipmentDetails?.destination || 'USA',
+      
+      estimatedDeparture: shipmentData.dates?.estimatedDeparture,
+      estimatedDepartureFormatted: formatDate(shipmentData.dates?.estimatedDeparture),
+      
+      estimatedArrival: shipmentData.dates?.estimatedArrival,
+      estimatedArrivalFormatted: formatDate(shipmentData.dates?.estimatedArrival),
+      
+      actualDelivery: shipmentData.dates?.actualDelivery || shipmentData.dates?.delivered,
+      actualDeliveryFormatted: formatDate(shipmentData.dates?.actualDelivery || shipmentData.dates?.delivered),
+      
+      lastUpdate: timeline[0]?.date || shipmentData.updatedAt,
+      lastUpdateFormatted: formatDate(timeline[0]?.date || shipmentData.updatedAt),
+      
+      // Package information
+      packages: packages,
+      totalPackages: packages.length || shipmentData.shipmentDetails?.totalPackages || 0,
+      totalWeight: totalWeight,
+      totalVolume: totalVolume,
+      
+      // Shipment details
+      shipmentDetails: {
+        totalPackages: packages.length || shipmentData.shipmentDetails?.totalPackages || 0,
+        totalWeight: totalWeight,
+        totalVolume: totalVolume,
+        shippingMode: shipmentData.shipmentDetails?.shippingMode || 'DDU',
+        serviceType: shipmentData.serviceType || 'standard',
+        origin: shipmentData.shipmentDetails?.origin || 'China',
+        destination: shipmentData.shipmentDetails?.destination || 'USA'
+      },
+      
+      // Sender & Receiver
+      sender: shipmentData.sender || {},
+      receiver: shipmentData.receiver || {},
+      
+      // Timeline
+      timeline: timeline,
+      
+      // Source info
+      source: source,
+      
+      // Additional info
+      createdAt: shipmentData.createdAt,
+      createdAtFormatted: formatDate(shipmentData.createdAt),
+      updatedAt: shipmentData.updatedAt,
+      updatedAtFormatted: formatDate(shipmentData.updatedAt)
+    };
+    
+    console.log('✅ Tracking Info Response:', {
+      tracking: trackingInfo.trackingNumber,
+      source: trackingInfo.source,
+      status: trackingInfo.status,
+      packagesCount: trackingInfo.packages.length,
+      timelineCount: trackingInfo.timeline.length,
+      currentLocation: trackingInfo.currentLocation
+    });
+    
+    res.status(200).json({
+      success: true,
+      data: trackingInfo
+    });
+    
+  } catch (error) {
+    console.error('❌ Tracking error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
 };
 
 // Helper function to calculate progress
