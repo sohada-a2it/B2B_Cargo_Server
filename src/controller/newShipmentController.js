@@ -1,6 +1,7 @@
 const NewShipment = require('../models/newShipmentModel');
-
-
+const { sendEmail, getSenderEmailTemplate, getReceiverEmailTemplate, getAdminEmailTemplate } = require('../service/manualShipmentMail');
+const { generateInvoicePDF, saveInvoiceRecord } = require('../service/manualShipmentInvoice');
+const { generateInvoiceFromShipment } = require('../utils/manualInvoiceGenerator');
 // ================== HELPER FUNCTIONS ==================
 
 // Generate shipment number
@@ -55,19 +56,24 @@ const generateTrackingNumber = async () => {
 
 
 
-// ================== CREATE SHIPMENT ==================
+// ================== CREATE SHIPMENT ================== 
 
+// createShipment ফাংশনটি আপডেট করুন
 exports.createShipment = async (req, res) => {
     try {
         const bookingData = req.body;
-
         console.log('📦 Creating shipment:', bookingData);
 
-        // ===== AUTO GENERATE =====
+        // Generate tracking and shipment numbers
         const trackingNumber = bookingData.trackingNumber || await generateTrackingNumber();
         const shipmentNumber = bookingData.shipmentNumber || await generateShipmentNumber();
 
-        // ===== TIMELINE =====
+        // Calculate total packages and weight
+        const packageDetails = (bookingData.shipmentDetails?.packageDetails || bookingData.packages || []);
+        const totalPackages = packageDetails.reduce((sum, pkg) => sum + (pkg.quantity || 1), 0);
+        const totalWeight = packageDetails.reduce((sum, pkg) => sum + (pkg.weight || 0), 0);
+
+        // Timeline entries
         const timelineEntries = (bookingData.timeline || []).map(entry => ({
             status: entry.status,
             description: entry.description || '',
@@ -87,36 +93,27 @@ exports.createShipment = async (req, res) => {
             });
         }
 
-        // ===== CREATE =====
+        // Create shipment
         const shipment = await NewShipment.create({
-
             shipmentNumber,
             trackingNumber,
-
-            // OPTIONAL RELATIONS
-            bookingId: null, // 🔥 force null
+            bookingId: null,
             customerId: bookingData.customer || null,
-
-            // CUSTOMER INFO
             customerInfo: {
                 name: bookingData.sender?.name,
                 email: bookingData.sender?.email,
                 phone: bookingData.sender?.phone,
                 companyName: bookingData.sender?.companyName
             },
-
-            // CLASSIFICATION
             shipmentClassification: bookingData.shipmentClassification,
-
             serviceType: bookingData.serviceType || 'standard',
-
-            // DETAILS
             shipmentDetails: {
                 origin: bookingData.shipmentDetails?.origin,
                 destination: bookingData.shipmentDetails?.destination,
                 shippingMode: bookingData.shipmentDetails?.shippingMode || 'DDU',
-
-                packageDetails: (bookingData.shipmentDetails?.packageDetails || bookingData.packages || []).map(pkg => ({
+                totalPackages: totalPackages,
+                totalWeight: totalWeight,
+                packageDetails: packageDetails.map(pkg => ({
                     description: pkg.description,
                     packagingType: pkg.packagingType || 'carton',
                     quantity: pkg.quantity || 1,
@@ -129,18 +126,13 @@ exports.createShipment = async (req, res) => {
                     hazardous: pkg.hazardous || false,
                     temperatureControlled: pkg.temperatureControlled || { required: false }
                 })),
-
                 specialInstructions: bookingData.shipmentDetails?.specialInstructions || '',
                 referenceNumber: bookingData.shipmentDetails?.referenceNumber || ''
             },
-
-            // DATES
             dates: {
                 estimatedDeparture: bookingData.dates?.estimatedDeparture,
                 estimatedArrival: bookingData.dates?.estimatedArrival
             },
-
-            // PRICE
             quotedPrice: {
                 amount: bookingData.quotedPrice?.amount || 0,
                 currency: bookingData.quotedPrice?.currency || 'USD',
@@ -149,51 +141,68 @@ exports.createShipment = async (req, res) => {
                 quotedBy: bookingData.createdBy,
                 quotedAt: new Date()
             },
-
             pricingStatus: bookingData.pricingStatus || 'quoted',
-
-            // PAYMENT
             payment: {
                 mode: bookingData.payment?.mode || 'bank_transfer',
                 currency: bookingData.payment?.currency || 'USD',
-                amount: bookingData.quotedPrice?.amount || 0
+                amount: bookingData.quotedPrice?.amount || 0,
+                status: 'pending'
             },
-
-            // PARTIES
             sender: bookingData.sender,
             receiver: bookingData.receiver,
-
-            // COURIER
             courier: {
                 company: bookingData.courier?.company || 'Cargo Logistics Group',
                 serviceType: bookingData.serviceType
             },
-
-            // STATUS
             status: bookingData.status || 'booking_requested',
             shipmentStatus: bookingData.shipmentStatus || 'pending',
             currentMilestone: timelineEntries[timelineEntries.length - 1]?.status,
-
-            // TIMELINE
             timeline: timelineEntries,
-
-            // AUDIT
             createdBy: bookingData.createdBy,
             updatedBy: bookingData.createdBy
         });
 
         console.log('✅ Shipment created:', shipment._id);
 
+        // ========== 🔥 GENERATE INVOICE FOR SHIPMENT ==========
+        let invoice = null;
+        try {
+            invoice = await generateInvoiceFromShipment(shipment);
+            if (invoice) {
+                console.log(`✅ Invoice created: ${invoice.invoiceNumber}`);
+                
+                // Update shipment with invoice reference (optional)
+                await NewShipment.findByIdAndUpdate(shipment._id, {
+                    $set: { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber }
+                });
+            } else {
+                console.log('⚠️ Invoice generation failed but shipment was created');
+            }
+        } catch (invoiceError) {
+            console.error('❌ Invoice generation error:', invoiceError);
+            // Don't fail the shipment creation if invoice fails
+        }
+
+        // Send emails in background
+        setImmediate(() => {
+            sendEmailsInBackground(shipment, invoice).catch(err => {
+                console.error('❌ Background email error:', err);
+            });
+        });
+
+        // Return response with invoice data
         return res.status(201).json({
             success: true,
-            message: 'Shipment created successfully',
-            data: shipment
+            message: 'Shipment created successfully with invoice',
+            data: {
+                shipment,
+                invoice: invoice || null
+            }
         });
 
     } catch (error) {
         console.error('❌ ERROR:', error);
 
-        // DUPLICATE ERROR
         if (error.code === 11000) {
             return res.status(409).json({
                 success: false,
@@ -209,6 +218,143 @@ exports.createShipment = async (req, res) => {
         });
     }
 };
+
+// ==================== GET SHIPMENT WITH INVOICE ====================
+exports.getShipmentWithInvoice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const shipment = await NewShipment.findById(id);
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found'
+            });
+        }
+
+        const invoice = await Invoice.findOne({ shipmentId: shipment._id });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                shipment,
+                invoice: invoice || null
+            }
+        });
+    } catch (error) {
+        console.error('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch shipment',
+            error: error.message
+        });
+    }
+};
+
+// ==================== REGENERATE INVOICE ====================
+exports.regenerateInvoice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const shipment = await NewShipment.findById(id);
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shipment not found'
+            });
+        }
+
+        // Delete old invoice if exists
+        await Invoice.deleteOne({ shipmentId: shipment._id });
+
+        // Generate new invoice
+        const invoice = await generateInvoiceFromShipment(shipment);
+
+        // Update shipment with new invoice reference
+        await NewShipment.findByIdAndUpdate(shipment._id, {
+            $set: { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Invoice regenerated successfully',
+            data: invoice
+        });
+    } catch (error) {
+        console.error('Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to regenerate invoice',
+            error: error.message
+        });
+    }
+};
+
+// এই ফাংশনটি createShipment এর বাইরে যোগ করুন (একদম নিচে)
+async function sendEmailsInBackground(shipment) {
+    console.log('📧 Starting background emails for:', shipment._id);
+    
+    try {
+        // 1. Sender কে ইমেইল
+        if (shipment.sender?.email) {
+            await sendEmail(
+                shipment.sender.email,
+                `Shipment Created - ${shipment.shipmentNumber}`,
+                getSenderEmailTemplate(shipment)
+            );
+            console.log(`✅ Email to sender: ${shipment.sender.email}`);
+        }
+
+        // 2. Receiver কে ইমেইল
+        if (shipment.receiver?.email) {
+            await sendEmail(
+                shipment.receiver.email,
+                `Your Parcel is On The Way - ${shipment.shipmentNumber}`,
+                getReceiverEmailTemplate(shipment)
+            );
+            console.log(`✅ Email to receiver: ${shipment.receiver.email}`);
+        }
+
+        // 3. Admin কে ইমেইল
+        const adminEmails = (process.env.ADMIN_EMAILS || 'admin@cargologistics.com').split(',');
+        for (const adminEmail of adminEmails) {
+            if (adminEmail.trim()) {
+                await sendEmail(
+                    adminEmail.trim(),
+                    `New Shipment Created - ${shipment.shipmentNumber}`,
+                    getAdminEmailTemplate(shipment)
+                );
+                console.log(`✅ Email to admin: ${adminEmail}`);
+            }
+        }
+
+        // 4. Invoice generate এবং পাঠান
+        if (shipment.quotedPrice?.amount > 0 && shipment.sender?.email) {
+            const invoice = await generateInvoicePDF(shipment);
+            await sendEmail(
+                shipment.sender.email,
+                `Invoice - ${shipment.shipmentNumber}`,
+                `<h2>Invoice Generated</h2><p>Amount: ${shipment.quotedPrice?.currency || 'USD'} ${shipment.quotedPrice?.amount || 0}</p>`,
+                [{ filename: invoice.filename, path: invoice.path }]
+            );
+            console.log(`✅ Invoice sent to: ${shipment.sender.email}`);
+            
+            // Save invoice info
+            await NewShipment.findByIdAndUpdate(shipment._id, {
+                $set: {
+                    'invoice.generated': true,
+                    'invoice.number': invoice.invoiceNumber,
+                    'invoice.path': invoice.path,
+                    'invoice.generatedAt': new Date()
+                }
+            });
+        }
+        
+        console.log('✅ All emails processed for:', shipment._id);
+    } catch (error) {
+        console.error('❌ Background email failed:', error);
+    }
+}
 // GET ALL SHIPMENTS - বুকিং কন্ট্রোলারের মতো করে
 exports.getAllNewShipments = async (req, res) => {
   try {
@@ -512,4 +658,226 @@ function getShipmentProgress(status) {
     'cancelled': 0
   };
   return progressMap[status] || 0;
-}
+} 
+
+// Define status sequence
+const STATUS_SEQUENCE = [
+  'booking_requested',
+  'pending',
+  'received_at_warehouse',
+  'picked_up_from_warehouse',
+  'departed_port_of_origin',
+  'in_transit',
+  'arrived_at_destination_port',
+  'under_customs_cleared',
+  'customs_clearance',
+  'out_for_delivery',
+  'delivered'
+];
+
+// Helper function to validate status transition
+const isValidStatusTransition = (currentStatus, newStatus) => {
+  const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
+  const newIndex = STATUS_SEQUENCE.indexOf(newStatus);
+  
+  if (currentIndex === -1) {
+    return newStatus === 'cancelled';
+  }
+  
+  if (newIndex > currentIndex) {
+    return true;
+  }
+  
+  if (newStatus === 'cancelled' && currentStatus !== 'delivered') {
+    return true;
+  }
+  
+  return false;
+};
+
+// Update shipment status
+// In newShipmentController.js
+
+exports.updateShipmentStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes, resumeTo, updateDateTime } = req.body;
+    const userId = req.user?._id || req.user?.id || 'system';
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status is required'
+      });
+    }
+
+    // Define status sequence
+    const STATUS_SEQUENCE = [
+      'booking_requested',
+      'pending',
+      'received_at_warehouse',
+      'picked_up_from_warehouse',
+      'departed_port_of_origin',
+      'in_transit',
+      'arrived_at_destination_port',
+      'under_customs_cleared',
+      'customs_clearance',
+      'out_for_delivery',
+      'delivered'
+    ];
+
+    // Validation function - UPDATED to allow on_hold
+    const isValidStatusTransition = (currentStatus, newStatus) => {
+      // Allow on_hold from any status except delivered
+      if (newStatus === 'on_hold' && currentStatus !== 'delivered') {
+        return true;
+      }
+      
+      // Allow cancelled from any status except delivered
+      if (newStatus === 'cancelled' && currentStatus !== 'delivered') {
+        return true;
+      }
+      
+      // Allow resume from on_hold
+      if (currentStatus === 'on_hold' && newStatus !== 'cancelled') {
+        return true;
+      }
+      
+      const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
+      const newIndex = STATUS_SEQUENCE.indexOf(newStatus);
+      
+      // Normal forward progression
+      if (currentIndex !== -1 && newIndex > currentIndex) {
+        return true;
+      }
+      
+      return false;
+    };
+
+    // Function to get allowed next statuses - UPDATED
+    const getAllowedNextStatuses = (currentStatus) => {
+      const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
+      
+      if (currentStatus === 'delivered') {
+        return [];
+      }
+      
+      const nextStatuses = [];
+      
+      // Add on_hold for any non-delivered status
+      if (currentStatus !== 'delivered' && currentStatus !== 'on_hold') {
+        nextStatuses.push('on_hold');
+      }
+      
+      // Add cancelled for any non-delivered status
+      if (currentStatus !== 'delivered') {
+        nextStatuses.push('cancelled');
+      }
+      
+      // Add forward progression statuses
+      if (currentIndex !== -1) {
+        const forwardStatuses = STATUS_SEQUENCE.slice(currentIndex + 1);
+        nextStatuses.push(...forwardStatuses);
+      }
+      
+      return nextStatuses;
+    };
+
+    // Find the shipment
+    const existingShipment = await NewShipment.findById(id);
+    
+    if (!existingShipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found'
+      });
+    }
+
+    const currentStatus = existingShipment.shipmentStatus || existingShipment.status;
+
+    // Check if status is already the same
+    if (currentStatus === status) {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment is already in ${status} status`
+      });
+    }
+
+    // Handle on_hold special case
+    let finalStatus = status;
+    let lastActiveStatus = existingShipment.lastActiveStatus;
+
+    if (currentStatus === 'on_hold' && status !== 'cancelled') {
+      // Resuming from on_hold
+      finalStatus = resumeTo || status;
+      lastActiveStatus = null;
+    } else if (status === 'on_hold') {
+      // Going into on_hold
+      lastActiveStatus = currentStatus;
+    }
+
+    // Validate status transition
+    const isValid = isValidStatusTransition(currentStatus, finalStatus);
+    
+    if (!isValid) {
+      const allowedStatuses = getAllowedNextStatuses(currentStatus);
+      
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status transition from ${currentStatus} to ${finalStatus}. You can only move forward in sequence, put on hold, or cancel.`,
+        currentStatus,
+        requestedStatus: finalStatus,
+        allowedNextStatuses: allowedStatuses
+      });
+    }
+
+    // Get current timestamp
+    const now = updateDateTime ? new Date(updateDateTime) : new Date();
+
+    // Prepare update data
+    const updateData = {
+      shipmentStatus: finalStatus,
+      status: finalStatus,
+      lastStatusUpdate: now,
+      lastUpdatedBy: userId
+    };
+
+    // Handle lastActiveStatus for on_hold
+    if (status === 'on_hold') {
+      updateData.lastActiveStatus = currentStatus;
+    } else if (currentStatus === 'on_hold' && finalStatus !== 'cancelled') {
+      updateData.lastActiveStatus = null;
+    }
+
+    // Create timeline entry
+    const timelineEntry = {
+      status: finalStatus,
+      description: notes || `Status updated from ${currentStatus} to ${finalStatus}`,
+      timestamp: now,
+      updatedBy: userId
+    };
+
+    // Update the shipment
+    const updatedShipment = await NewShipment.findByIdAndUpdate(
+      id,
+      {
+        $set: updateData,
+        $push: { timeline: timelineEntry }
+      },
+      { new: true, runValidators: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: updatedShipment,
+      message: `Shipment status updated from ${currentStatus} to ${finalStatus} successfully`
+    });
+
+  } catch (error) {
+    console.error('Error updating shipment status:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update shipment status'
+    });
+  }
+};

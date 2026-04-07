@@ -195,11 +195,11 @@ router.post('/contact', async (req, res) => {
 
     // Send email to admin
     console.log('📧 Sending email to ADMIN...');
-    console.log('  To:', process.env.ADMIN_EMAIL || process.env.SMTP_USER);
+    console.log('  To:', process.env.ADMIN_EMAIL || process.env.SMTP_USER_INFO);
     
     const adminInfo = await transporter.sendMail({
-      from: `"B2B Logistics Contact" <${process.env.SMTP_USER}>`,
-      to: process.env.ADMIN_EMAIL || process.env.SMTP_USER,
+      from: `"B2B Logistics Contact" <${process.env.SMTP_USER_INFO}>`,
+      to: process.env.ADMIN_EMAIL || process.env.SMTP_USER_INFO,
       replyTo: formData.email,
       subject: `📬 New Contact Form - ${contactId} - ${formData.inquiryType}`,
       html: getAdminEmailTemplate(formData, contactId)
@@ -212,7 +212,7 @@ router.post('/contact', async (req, res) => {
     console.log('  To:', formData.email);
     
     const customerInfo = await transporter.sendMail({
-      from: `"B2B Logistics Support" <${process.env.SMTP_USER}>`,
+      from: `"B2B Logistics Support" <${process.env.SMTP_USER_INFO}>`,
       to: formData.email,
       subject: `We received your message - ${contactId}`,
       html: getCustomerEmailTemplate(formData, contactId)

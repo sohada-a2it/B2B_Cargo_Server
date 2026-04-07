@@ -10,6 +10,7 @@ const warehouseController = require('../controller/warehouseController');
 const consolidationController = require('../controller/consolidationController');
 const trackingController = require('../controller/trackingController');
 const damageReportController = require('../controller/damageController');
+const ManualInvoiceController = require('../controller/manualInvoiceController');
 const { body } = require('express-validator');
 // ==================== PUBLIC ROUTES (No Authentication Needed) ==================== 
 router.get('/find-by-email', async (req, res) => {
@@ -193,6 +194,15 @@ router.post(
     adminOnly, 
     bookingController.bulkUpdateInvoices
 ); 
+
+// Get all invoices (admin only)
+router.get('/getAllmanualInvoices', protect,adminOnly, ManualInvoiceController.getManualInvoices);
+
+// Get single invoice by ID
+router.get('/manualInvoices/:id', protect, adminOnly, ManualInvoiceController.getInvoiceById);
+
+// Delete invoice
+router.delete('/deletemanualInvoice/:id', protect, adminOnly, ManualInvoiceController.deleteInvoice);
 // shipment
 // ==================== PUBLIC ROUTES ====================  
 // ========== PUBLIC TRACKING (No Auth Required) ==========
@@ -200,6 +210,7 @@ router.post("/create-shipments", protect, newShipmentController.createShipment);
 router.get("/getNewShipment", protect,adminOnly, newShipmentController.getAllNewShipments);
 router.get('/getAllShipment',protect,  adminOnly, shipmentController.getAllShipments); 
 router.get('/shipments/track/:trackingNumber',protect, shipmentController.trackByNumber); 
+
 // manual shipping
 // Customer shipment routes (protected) 
 router.get('/my-new-shipments', protect, newShipmentController.getMyShipments);
@@ -207,7 +218,10 @@ router.get('/my-shipments/summary', protect,  newShipmentController.getMyShipmen
 router.get('/my-shipments/:id', protect,  newShipmentController.getMyShipmentById);
 router.get('/my-shipments/:id/tracking', protect,  newShipmentController.getMyShipmentTracking);
 // router.post('/my-shipments/:id/return-request', protect,  newShipmentController.requestReturn);
-
+router.put('/updateShipmentStatus/:id',protect, adminOnly, newShipmentController.updateShipmentStatus
+);
+router.get('/shipments/:id/invoice', protect, newShipmentController.getShipmentWithInvoice);
+router.post('/shipments/:id/regenerate-invoice', protect, newShipmentController.regenerateInvoice);
 // ========== CUSTOMER ROUTES ==========
 router.get('/my-shipments',protect,  shipmentController.getMyShipments); 
 router.get('/my-shipments/:id',protect,  shipmentController.getMyShipmentById); 

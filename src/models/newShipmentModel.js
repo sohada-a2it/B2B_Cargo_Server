@@ -320,6 +320,7 @@ const newShipmentSchema = new mongoose.Schema({
             'in_transit_sea_freight',
             'in_transit',
             'arrived_at_destination_port',
+            'under_customs_cleared',  
             'customs_cleared',
             'out_for_delivery',
             'delivered',
@@ -340,9 +341,10 @@ const newShipmentSchema = new mongoose.Schema({
             'in_transit_sea_freight',
             'in_transit',
             'arrived_at_destination_port',
+            'under_customs_cleared',
             'customs_cleared',
             'out_for_delivery',
-            'delivered',
+            'delivered', 
             'on_hold',
             'cancelled',
             'returned'
@@ -363,7 +365,10 @@ const newShipmentSchema = new mongoose.Schema({
         },
         lastUpdated: Date
     },
-    
+    lastActiveStatus: {
+  type: String,
+  default: null
+},
     // ========== TIMELINE (ফ্রন্টএন্ডের trackingTimeline এর সাথে মিল রেখে) ==========
     timeline: [{
         status: {
@@ -426,7 +431,14 @@ const newShipmentSchema = new mongoose.Schema({
             default: Date.now
         }
     }],
-    
+      // Invoice reference
+    invoiceId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Invoice'
+    },
+    invoiceNumber: {
+        type: String
+    },
     // ========== AUDIT ==========
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
