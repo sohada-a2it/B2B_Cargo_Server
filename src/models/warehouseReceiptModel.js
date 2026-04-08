@@ -98,18 +98,18 @@ const warehouseReceiptSchema = new mongoose.Schema({
     },
 
     // Receipt Status
-    status: {
-        type: String,
-        enum: [
-            'expected',
-            'received',
-            'inspected',
-            'stored',
-            'damaged_report',
-            'shortage_report'
-        ],
-        default: 'received'
-    },
+   status: {
+    type: String,
+    enum: ['expected', 'received', 'inspected', 'consolidated', 'stored', 'damaged_report', 'shortage_report'],
+    default: 'expected'
+},
+consolidatedAt: {
+    type: Date
+},
+consolidationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Consolidation'
+},
 
     // Inspection Details
     inspection: {

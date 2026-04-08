@@ -6,7 +6,10 @@ const consolidationSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-    
+    receiptIds: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'WarehouseReceipt'
+    }],
     // ===== Classification (গ্রুপিং এর জন্য) =====
     mainType: {
         type: String,

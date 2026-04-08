@@ -366,103 +366,62 @@ exports.addMultipleToQueue = async (req, res) => {
 };
 
 // ========== 3. GET CONSOLIDATION QUEUE ==========
+// controllers/consolidationController.js (বা যেখানে queue ফাংশন আছে)
+
 exports.getConsolidationQueue = async (req, res) => {
     try {
-        const { groupBy = 'group', origin, destination, mainType, subType } = req.query;
+        // শুধু pending স্ট্যাটাসের আইটেম দেখাবে, consolidated নয়
+        const queueItems = await ConsolidationQueue.find({ 
+            status: 'pending'  // ← এই লাইনটা গুরুত্বপূর্ণ
+        })
+        .populate('shipmentId', 'trackingNumber status shipmentDetails')
+        .populate('customerId', 'firstName lastName companyName email phone')
+        .populate('addedBy', 'firstName lastName')
+        .sort({ addedAt: 1 });
+
+        // Group by destination and type
+        const groups = {};
         
-        // Build query
-        let query = { status: 'pending' };
-        if (origin) query.origin = origin;
-        if (destination) query.destination = destination;
-        if (mainType) query.mainType = mainType;
-        if (subType) query.subType = subType;
-        
-        const queue = await ConsolidationQueue.find(query)
-            .populate({
-                path: 'shipmentId',
-                select: 'trackingNumber shipmentDetails status'
-            })
-            .populate('customerId', 'companyName firstName lastName email phone')
-            .populate('addedBy', 'firstName lastName')
-            .sort({ addedAt: 1 });
+        queueItems.forEach(item => {
+            const key = `${item.mainType}_${item.subType}_${item.origin}_${item.destination}`;
+            
+            if (!groups[key]) {
+                groups[key] = {
+                    groupKey: key,
+                    mainType: item.mainType,
+                    subType: item.subType,
+                    origin: item.origin,
+                    destination: item.destination,
+                    displayName: `${item.origin || 'Unknown'} → ${item.destination || 'Unknown'}`,
+                    shipments: [],
+                    totalPackages: 0,
+                    totalWeight: 0,
+                    totalVolume: 0,
+                    count: 0
+                };
+            }
+            
+            groups[key].shipments.push(item);
+            groups[key].totalPackages += item.totalPackages || 0;
+            groups[key].totalWeight += item.totalWeight || 0;
+            groups[key].totalVolume += item.totalVolume || 0;
+            groups[key].count++;
+        });
 
-        if (groupBy === 'group') {
-            // Group by mainType, subType, origin, destination
-            const grouped = queue.reduce((acc, item) => {
-                const key = item.groupKey;
-                
-                if (!acc[key]) {
-                    acc[key] = {
-                        groupKey: key,
-                        mainType: item.mainType,
-                        mainTypeName: getMainTypeName(item.mainType),
-                        subType: item.subType,
-                        subTypeName: getSubTypeName(item.subType),
-                        origin: item.origin,
-                        destination: item.destination,
-                        destinationCountry: item.destinationCountry,
-                        displayName: `${getMainTypeName(item.mainType)} (${getSubTypeName(item.subType)}) - ${item.origin} → ${item.destination}`,
-                        shipments: [],
-                        totalWeight: 0,
-                        totalVolume: 0,
-                        totalPackages: 0,
-                        count: 0,
-                        oldestAdded: item.addedAt,
-                        newestAdded: item.addedAt
-                    };
-                }
-                
-                acc[key].shipments.push({
-                    _id: item._id,
-                    shipmentId: item.shipmentId,
-                    trackingNumber: item.trackingNumber,
-                    customer: item.customerId,
-                    packages: item.totalPackages,
-                    weight: item.totalWeight,
-                    volume: item.totalVolume,
-                    addedAt: item.addedAt,
-                    addedBy: item.addedBy
-                });
-                
-                acc[key].totalWeight += item.totalWeight || 0;
-                acc[key].totalVolume += item.totalVolume || 0;
-                acc[key].totalPackages += item.totalPackages || 0;
-                acc[key].count++;
-                
-                // Update oldest/newest dates
-                if (item.addedAt < acc[key].oldestAdded) acc[key].oldestAdded = item.addedAt;
-                if (item.addedAt > acc[key].newestAdded) acc[key].newestAdded = item.addedAt;
-                
-                return acc;
-            }, {});
+        const groupsArray = Object.values(groups);
 
-            // Convert to array and sort by oldestAdded
-            const groups = Object.values(grouped).sort((a, b) => 
-                new Date(a.oldestAdded) - new Date(b.oldestAdded)
-            );
-
-            res.status(200).json({
-                success: true,
-                data: {
-                    groups: groups,
-                    totalGroups: groups.length,
-                    totalItems: queue.length
-                }
-            });
-        } else {
-            // Return flat list
-            res.status(200).json({
-                success: true,
-                data: {
-                    items: queue,
-                    totalItems: queue.length
-                }
-            });
-        }
+        res.status(200).json({
+            success: true,
+            data: {
+                groups: groupsArray,
+                totalGroups: groupsArray.length,
+                totalItems: queueItems.length
+            }
+        });
 
     } catch (error) {
-        console.error('Get queue error:', error);
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Get consolidation queue error:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
@@ -558,6 +517,7 @@ exports.createConsolidation = async (req, res) => {
             sealNumber,
             estimatedDeparture,
             selectedShipmentIds,
+            receiptIds,  // ← যোগ করুন: রিসিপ্ট আইডি গুলো
         } = req.body;
 
         // Helper function for seal number generation
@@ -640,7 +600,8 @@ exports.createConsolidation = async (req, res) => {
         console.log('📦 Creating consolidation with:', {
             consolidationNumber,
             sealNumber: finalSealNumber,
-            containerNumber: finalContainerNumber
+            containerNumber: finalContainerNumber,
+            receiptIds: receiptIds  // ← লগ করুন
         });
 
         // Create consolidation
@@ -653,7 +614,7 @@ exports.createConsolidation = async (req, res) => {
             
             containerNumber: finalContainerNumber,
             containerType: finalContainerType,
-            sealNumber: finalSealNumber,  // ← Auto-generated seal number
+            sealNumber: finalSealNumber,
             
             totalShipments: queueItems.length,
             totalPackages,
@@ -669,6 +630,8 @@ exports.createConsolidation = async (req, res) => {
             status: 'draft',
             
             items,
+            
+            receiptIds: receiptIds || [],  // ← যোগ করুন: রিসিপ্ট আইডি সংরক্ষণ করুন
             
             createdBy: req.user._id
         });
@@ -693,7 +656,7 @@ exports.createConsolidation = async (req, res) => {
                     warehouseStatus: 'consolidated',
                     consolidationId: consolidation._id,
                     'transport.containerNumber': finalContainerNumber,
-                    'transport.sealNumber': finalSealNumber  // ← Add seal to transport
+                    'transport.sealNumber': finalSealNumber
                 },
                 $push: {
                     milestones: {
@@ -706,6 +669,62 @@ exports.createConsolidation = async (req, res) => {
                 }
             }
         );
+
+        // ✅ IMPORTANT: Update warehouse receipts to consolidated status
+        if (receiptIds && receiptIds.length > 0) {
+            try {
+                // Dynamic import to avoid circular dependency
+                const WarehouseReceipt = require('../models/WarehouseReceipt');
+                
+                const updateResult = await WarehouseReceipt.updateMany(
+                    { _id: { $in: receiptIds } },
+                    { 
+                        $set: { 
+                            status: 'consolidated',
+                            consolidatedAt: new Date(),
+                            consolidationId: consolidation._id
+                        }
+                    }
+                );
+                
+                console.log(`✅ Updated ${updateResult.modifiedCount} warehouse receipts to consolidated status`);
+            } catch (receiptError) {
+                console.error('Error updating warehouse receipts:', receiptError);
+                // Don't fail the whole operation, just log error
+            }
+        } else {
+            // Try to extract receipt IDs from queue items
+            console.log('⚠️ No receiptIds provided, trying to extract from queue items...');
+            const extractedReceiptIds = [];
+            
+            for (const item of queueItems) {
+                if (item.receiptId) {
+                    extractedReceiptIds.push(item.receiptId);
+                }
+                if (item.shipmentId && item.shipmentId.receiptId) {
+                    extractedReceiptIds.push(item.shipmentId.receiptId);
+                }
+            }
+            
+            if (extractedReceiptIds.length > 0) {
+                try {
+                    const WarehouseReceipt = require('../models/WarehouseReceipt');
+                    await WarehouseReceipt.updateMany(
+                        { _id: { $in: extractedReceiptIds } },
+                        { 
+                            $set: { 
+                                status: 'consolidated',
+                                consolidatedAt: new Date(),
+                                consolidationId: consolidation._id
+                            }
+                        }
+                    );
+                    console.log(`✅ Updated ${extractedReceiptIds.length} extracted receipts`);
+                } catch (err) {
+                    console.error('Error updating extracted receipts:', err);
+                }
+            }
+        }
 
         // Send notifications
         try {
@@ -722,7 +741,7 @@ exports.createConsolidation = async (req, res) => {
                                 q.customerId?._id.toString() === customer._id.toString()
                             ).length,
                             destination: firstItem.destination,
-                            sealNumber: finalSealNumber  // ← Add seal to email
+                            sealNumber: finalSealNumber
                         }
                     });
                 }

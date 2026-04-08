@@ -32,14 +32,13 @@ const newShipmentSchema = new mongoose.Schema({
     },
     
     // ========== RELATIONSHIPS ==========
-    
     customerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         default: null
     },
     
-    // ========== SHIPMENT CLASSIFICATION (ফ্রন্টএন্ডের সাথে মিল রেখে) ==========
+    // ========== SHIPMENT CLASSIFICATION ==========
     shipmentClassification: {
         mainType: {
             type: String,
@@ -49,13 +48,9 @@ const newShipmentSchema = new mongoose.Schema({
         subType: {
             type: String,
             enum: [
-                // Sea freight (ফ্রন্টএন্ডের মতো)
                 'sea_freight_fcl', 'sea_freight_lcl',
-                // Air freight
                 'air_freight',
-                // Inland trucking
                 'inland_transport',
-                // Multimodal
                 'door_to_door'
             ],
             required: true
@@ -322,6 +317,9 @@ const newShipmentSchema = new mongoose.Schema({
             'arrived_at_destination_port',
             'under_customs_cleared',  
             'customs_cleared',
+            'under_customs_cleared',    // ← যোগ করুন
+  'customs_clearance',         // ← যোগ করুন (এটা আপনি ব্যবহার করছেন)
+  'customs_cleared',
             'out_for_delivery',
             'delivered',
             'on_hold',
@@ -343,6 +341,9 @@ const newShipmentSchema = new mongoose.Schema({
             'arrived_at_destination_port',
             'under_customs_cleared',
             'customs_cleared',
+            'under_customs_cleared',    // ← যোগ করুন
+  'customs_clearance',         // ← যোগ করুন (এটা আপনি ব্যবহার করছেন)
+  'customs_cleared',
             'out_for_delivery',
             'delivered', 
             'on_hold',
@@ -365,11 +366,13 @@ const newShipmentSchema = new mongoose.Schema({
         },
         lastUpdated: Date
     },
+    
     lastActiveStatus: {
-  type: String,
-  default: null
-},
-    // ========== TIMELINE (ফ্রন্টএন্ডের trackingTimeline এর সাথে মিল রেখে) ==========
+        type: String,
+        default: null
+    },
+    
+    // ========== TIMELINE ==========
     timeline: [{
         status: {
             type: String,
@@ -390,6 +393,87 @@ const newShipmentSchema = new mongoose.Schema({
             default: {}
         }
     }],
+    
+    // ========== RETURN REQUEST (যোগ করুন) ==========
+    returnRequest: {
+        requestedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        requestedAt: Date,
+        status: {
+            type: String,
+            enum: ['none', 'pending', 'approved', 'rejected_by_admin', 'rejected_by_customer', 'completed'],
+            default: 'none'
+        },
+        reason: {
+            type: String,
+            enum: ['damaged_product', 'wrong_product', 'missing_items', 'delayed_delivery', 'customer_cancellation', 'other']
+        },
+        description: String,
+        items: [{
+            packageId: mongoose.Schema.Types.ObjectId,
+            quantity: Number,
+            reason: String
+        }],
+        images: [String],
+        
+        // Return cost
+        returnCost: {
+            type: Number,
+            default: 0
+        },
+        returnCostCurrency: {
+            type: String,
+            default: 'USD'
+        },
+        returnCostBreakdown: {
+            shippingCost: Number,
+            handlingFee: Number,
+            restockingFee: Number,
+            total: Number,
+            note: String
+        },
+        isFreeReturn: {
+            type: Boolean,
+            default: false
+        },
+        
+        // Admin fields
+        approvedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        approvedAt: Date,
+        rejectionReason: String,
+        returnTrackingNumber: String,
+        returnNotes: String,
+        
+        // Cost adjustment by admin
+        returnCostAdjustedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        returnCostAdjustedAt: Date,
+        returnCostAdjustmentReason: String,
+        
+        // Customer confirmation
+        customerConfirmedAt: Date,
+        customerRejectedAt: Date,
+        customerRejectionReason: String,
+        customerNotes: String,
+        costAccepted: {
+            type: Boolean,
+            default: false
+        },
+        
+        // Completion
+        completedAt: Date,
+        completedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        }
+    },
     
     // ========== DOCUMENTS ==========
     documents: [{
@@ -431,7 +515,8 @@ const newShipmentSchema = new mongoose.Schema({
             default: Date.now
         }
     }],
-      // Invoice reference
+    
+    // Invoice reference
     invoiceId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Invoice'
@@ -439,6 +524,7 @@ const newShipmentSchema = new mongoose.Schema({
     invoiceNumber: {
         type: String
     },
+    
     // ========== AUDIT ==========
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -467,7 +553,7 @@ newShipmentSchema.index({ shipmentStatus: 1 });
 newShipmentSchema.index({ 'sender.email': 1 });
 newShipmentSchema.index({ 'receiver.email': 1 });
 newShipmentSchema.index({ customerId: 1 });
-newShipmentSchema.index({ bookingId: 1 });
+newShipmentSchema.index({ 'returnRequest.status': 1 }); // Return status এর জন্য index
 
 // ========== VIRTUAL FIELDS ==========
 newShipmentSchema.virtual('isDelivered').get(function() {
@@ -480,6 +566,22 @@ newShipmentSchema.virtual('isCancelled').get(function() {
 
 newShipmentSchema.virtual('isBookingConfirmed').get(function() {
     return this.status === 'booking_confirmed';
+});
+
+newShipmentSchema.virtual('hasReturnRequest').get(function() {
+    return this.returnRequest && this.returnRequest.status !== 'none';
+});
+
+newShipmentSchema.virtual('isReturnPending').get(function() {
+    return this.returnRequest?.status === 'pending';
+});
+
+newShipmentSchema.virtual('isReturnApproved').get(function() {
+    return this.returnRequest?.status === 'approved';
+});
+
+newShipmentSchema.virtual('isReturnCompleted').get(function() {
+    return this.returnRequest?.status === 'completed';
 });
 
 // ========== METHODS ==========
@@ -516,6 +618,65 @@ newShipmentSchema.methods.updateShipmentStatus = function(status, location, desc
 newShipmentSchema.methods.updateBookingStatus = function(status, description, location, userId) {
     this.status = status;
     this.addTimelineEntry(status, description, location, userId);
+    return this;
+};
+
+// Return request methods
+newShipmentSchema.methods.requestReturn = function(userId, returnData) {
+    this.returnRequest = {
+        requestedBy: userId,
+        requestedAt: new Date(),
+        status: 'pending',
+        reason: returnData.reason,
+        description: returnData.description,
+        items: returnData.items || [],
+        images: returnData.images || [],
+        returnCost: returnData.returnCost || 0,
+        returnCostCurrency: returnData.returnCostCurrency || 'USD',
+        returnCostBreakdown: returnData.returnCostBreakdown || {},
+        isFreeReturn: returnData.isFreeReturn || false
+    };
+    
+    this.addTimelineEntry('return_requested', `Return requested: ${returnData.reason}`, null, userId);
+    return this;
+};
+
+newShipmentSchema.methods.approveReturn = function(userId, approveData) {
+    if (this.returnRequest && this.returnRequest.status === 'pending') {
+        this.returnRequest.status = 'approved';
+        this.returnRequest.approvedBy = userId;
+        this.returnRequest.approvedAt = new Date();
+        this.returnRequest.returnTrackingNumber = approveData.returnTrackingNumber;
+        this.returnRequest.returnNotes = approveData.notes;
+        
+        // Update cost if adjusted
+        if (approveData.adjustCost) {
+            this.returnRequest.returnCost = approveData.adjustCost.amount;
+            this.returnRequest.returnCostAdjustedBy = userId;
+            this.returnRequest.returnCostAdjustedAt = new Date();
+            this.returnRequest.returnCostAdjustmentReason = approveData.adjustCost.reason;
+        }
+        
+        this.addTimelineEntry('return_approved', `Return approved. Tracking: ${approveData.returnTrackingNumber || 'N/A'}`, null, userId);
+    }
+    return this;
+};
+
+newShipmentSchema.methods.completeReturn = function(userId, notes, acceptCost) {
+    if (this.returnRequest && this.returnRequest.status === 'approved') {
+        this.returnRequest.status = 'completed';
+        this.returnRequest.customerConfirmedAt = new Date();
+        this.returnRequest.customerNotes = notes;
+        this.returnRequest.completedAt = new Date();
+        this.returnRequest.completedBy = userId;
+        this.returnRequest.costAccepted = acceptCost;
+        
+        // Update shipment status
+        this.shipmentStatus = 'returned';
+        this.status = 'returned';
+        
+        this.addTimelineEntry('return_completed', `Return completed by customer. Cost accepted: ${acceptCost}`, null, userId);
+    }
     return this;
 };
 

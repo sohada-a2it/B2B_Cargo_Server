@@ -465,4 +465,22 @@ router.post('/damage-reports/bulk/update', protect, adminOnly, damageReportContr
 
 // DELETE /damage-reports/:id - Delete report (Admin only)
 router.delete('/damage-reports/:id', protect, adminOnly, damageReportController.deleteDamageReport);
+
+// backend/routes/warehouse.js - এই রাউট যোগ করুন
+
+router.patch('/receipts/:receiptId/consolidate', async (req, res) => {
+  try {
+    const receipt = await WarehouseReceipt.findByIdAndUpdate(
+      req.params.receiptId,
+      { 
+        status: 'consolidated',
+        consolidatedAt: new Date()
+      },
+      { new: true }
+    );
+    res.json({ success: true, data: receipt });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
 module.exports = router;

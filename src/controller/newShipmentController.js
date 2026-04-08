@@ -420,26 +420,38 @@ exports.getAllNewShipments = async (req, res) => {
     });
   }
 }; 
+ 
+
+// controllers/newShipmentController.js - getMyShipments ফাংশন
 
 exports.getMyShipments = async (req, res) => {
   try {
     const { page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'desc', search, status, startDate, endDate } = req.query;
 
-    // Build query for customer's shipments including null customerId
+    console.log('🔍 getMyShipments called with query:', req.query);
+    console.log('🔍 User ID:', req.user?._id);
+    console.log('🔍 User email:', req.user?.email);
+
+    // Build query - search by multiple conditions
     let query = {
       $or: [
         { customerId: req.user._id },
         { 'sender.email': req.user.email },
-        { 'receiver.email': req.user.email }
+        { 'receiver.email': req.user.email },
+        { 'customerInfo.email': req.user.email }
       ]
     };
 
     // Add search filter
     if (search) {
-      query.$or.push(
-        { shipmentNumber: { $regex: search, $options: 'i' } },
-        { trackingNumber: { $regex: search, $options: 'i' } }
-      );
+      query.$and = [
+        {
+          $or: [
+            { shipmentNumber: { $regex: search, $options: 'i' } },
+            { trackingNumber: { $regex: search, $options: 'i' } }
+          ]
+        }
+      ];
     }
 
     // Add status filter
@@ -454,8 +466,11 @@ exports.getMyShipments = async (req, res) => {
       if (endDate) query.createdAt.$lte = new Date(endDate);
     }
     
+    console.log('🔍 MongoDB Query:', JSON.stringify(query, null, 2));
+    
     // Count total documents
     const total = await NewShipment.countDocuments(query);
+    console.log('📊 Total count:', total);
     
     // Build sort object
     const sort = {};
@@ -464,27 +479,31 @@ exports.getMyShipments = async (req, res) => {
     // Execute query with pagination
     const shipments = await NewShipment.find(query)
       .sort(sort)
-      .skip((page - 1) * limit)
+      .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit))
       .populate('customerId', 'firstName lastName email phone companyName');
+    
+    console.log(`✅ Found ${shipments.length} shipments for user: ${req.user.email}`);
     
     // Calculate summary
     const summary = await getShipmentSummaryForCustomer(req.user._id);
     
+    // Return response
     res.status(200).json({
       success: true,
       data: shipments,
-      summary,
+      summary: summary,
       pagination: {
-        total,
+        total: total,
         page: parseInt(page),
         limit: parseInt(limit),
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / parseInt(limit))
       },
       message: 'Shipments fetched successfully'
     });
+    
   } catch (error) {
-    console.error('Get my shipments error:', error);
+    console.error('❌ Get my shipments error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch shipments',
