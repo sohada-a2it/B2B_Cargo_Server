@@ -1,15 +1,17 @@
-// utils/invoiceGenerator.js
+// utils/invoiceGenerator.js - SINGLE FILE FOR BOTH VERECL & RENDER
 const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
 const Invoice = require('../models/ManualInvoice');
 
-// Ensure invoices directory exists
-const invoiceDir = path.join(process.cwd(), 'invoices');
-if (!fs.existsSync(invoiceDir)) {
-    fs.mkdirSync(invoiceDir, { recursive: true });
-}
+// ========== ENVIRONMENT DETECTION ==========
+const isVercel = process.env.VERCEL === '1';
+const isRender = process.env.RENDER === 'true';
 
+console.log(`✅ Running on: ${isVercel ? 'Vercel' : isRender ? 'Render' : 'Local'}`);
+
+// ========== IN-MEMORY STORAGE FOR VERECL ==========
+const pdfStorage = new Map();
+
+// ========== UTILITY FUNCTIONS ==========
 const generateInvoiceNumber = async () => {
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -18,7 +20,6 @@ const generateInvoiceNumber = async () => {
     return `INV-${year}${month}-${sequence}`;
 };
 
-// Format currency
 const formatCurrency = (amount, currency = 'USD') => {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
@@ -27,7 +28,6 @@ const formatCurrency = (amount, currency = 'USD') => {
     }).format(amount || 0);
 };
 
-// Format date
 const formatDate = (date) => {
     if (!date) return 'N/A';
     return new Date(date).toLocaleDateString('en-US', {
@@ -37,22 +37,17 @@ const formatDate = (date) => {
     });
 };
 
-// Generate PDF
+// ========== PDF GENERATION (Universal) ==========
 const generateInvoicePDF = async (invoice, shipment) => {
     return new Promise((resolve, reject) => {
         try {
             const filename = `${invoice.invoiceNumber}.pdf`;
-            const filepath = path.join(invoiceDir, filename);
-            const doc = new PDFDocument({ 
-                margin: 50,
-                size: 'A4'
-            });
+            const doc = new PDFDocument({ margin: 50, size: 'A4' });
             
-            const stream = fs.createWriteStream(filepath);
-            doc.pipe(stream);
-
-            // ========== HEADER ==========
-            // Logo Area
+            const chunks = [];
+            doc.on('data', (chunk) => chunks.push(chunk));
+            
+            // ===== HEADER =====
             doc.rect(0, 0, doc.page.width, 120).fill('#1a1a2e');
             doc.fillColor('#ffffff');
             doc.fontSize(24).font('Helvetica-Bold').text('CARGO LOGISTICS', 50, 40);
@@ -60,18 +55,15 @@ const generateInvoicePDF = async (invoice, shipment) => {
             doc.fontSize(8).text('8825 STANFORD BLVD, SUITE 306, COLUMBIA, MD 21045, USA', 50, 90);
             doc.text('Phone: +1-647-362-7735 | Email: info@cargologisticscompany.com', 50, 105);
             
-            // Invoice Title
             doc.rect(doc.page.width - 180, 40, 130, 70).fill('#E67E22');
             doc.fillColor('#ffffff');
             doc.fontSize(16).font('Helvetica-Bold').text('INVOICE', doc.page.width - 170, 55);
             doc.fontSize(8).font('Helvetica').text(`Number: ${invoice.invoiceNumber}`, doc.page.width - 170, 78);
             doc.text(`Date: ${formatDate(invoice.generatedAt)}`, doc.page.width - 170, 93);
-            
             doc.fillColor('#333333');
 
-            // ========== SHIPMENT & BILLING INFO ==========
+            // ===== SHIPMENT & BILLING INFO =====
             let yPos = 150;
-            
             doc.rect(50, yPos, 250, 75).fill('#f8f9fa');
             doc.rect(310, yPos, 240, 75).fill('#f8f9fa');
             
@@ -92,7 +84,7 @@ const generateInvoicePDF = async (invoice, shipment) => {
             
             yPos += 95;
             
-            // ========== SENDER & RECEIVER ==========
+            // ===== SENDER & RECEIVER =====
             doc.rect(50, yPos, 250, 110).fill('#f8f9fa');
             doc.rect(310, yPos, 240, 110).fill('#f8f9fa');
             
@@ -125,7 +117,7 @@ const generateInvoicePDF = async (invoice, shipment) => {
             
             yPos += 130;
             
-            // ========== ROUTE ==========
+            // ===== ROUTE =====
             doc.rect(50, yPos, 500, 45).fill('#f0fdf4');
             doc.fillColor('#166534');
             doc.fontSize(8).font('Helvetica');
@@ -137,12 +129,11 @@ const generateInvoicePDF = async (invoice, shipment) => {
             
             yPos += 65;
             
-            // ========== ITEMS TABLE ==========
+            // ===== ITEMS TABLE =====
             const tableTop = yPos;
             const headers = ['Description', 'Qty', 'Weight', 'Unit Price', 'Total'];
             const widths = [200, 45, 65, 85, 85];
             
-            // Header
             doc.rect(50, tableTop, 500, 28).fill('#E67E22');
             doc.fillColor('#ffffff');
             doc.fontSize(8).font('Helvetica-Bold');
@@ -153,7 +144,6 @@ const generateInvoicePDF = async (invoice, shipment) => {
                 x += widths[i];
             });
             
-            // Rows
             doc.fillColor('#333333');
             doc.fontSize(8).font('Helvetica');
             
@@ -186,9 +176,8 @@ const generateInvoicePDF = async (invoice, shipment) => {
                 rowY += 22;
             });
             
-            // ========== SUMMARY ==========
+            // ===== SUMMARY =====
             const summaryY = rowY + 15;
-            
             doc.rect(350, summaryY, 200, 90).fill('#f8f9fa');
             
             doc.fillColor('#333333');
@@ -206,7 +195,7 @@ const generateInvoicePDF = async (invoice, shipment) => {
             doc.text('TOTAL:', 360, summaryY + 68);
             doc.text(formatCurrency(invoice.totalAmount, invoice.currency), 520, summaryY + 68, { align: 'right' });
             
-            // ========== NOTES ==========
+            // ===== NOTES =====
             if (invoice.notes) {
                 const notesY = summaryY + 110;
                 if (notesY < doc.page.height - 80) {
@@ -219,7 +208,7 @@ const generateInvoicePDF = async (invoice, shipment) => {
                 }
             }
             
-            // ========== FOOTER ==========
+            // ===== FOOTER =====
             const footerY = doc.page.height - 65;
             doc.rect(0, footerY, doc.page.width, 65).fill('#1a1a2e');
             doc.fillColor('#ffffff');
@@ -230,15 +219,24 @@ const generateInvoicePDF = async (invoice, shipment) => {
             
             doc.end();
             
-            stream.on('finish', () => {
+            doc.on('end', () => {
+                const pdfBuffer = Buffer.concat(chunks);
+                
+                // Store in memory (for both platforms)
+                const pdfId = `${invoice.invoiceNumber}_${Date.now()}`;
+                pdfStorage.set(pdfId, pdfBuffer);
+                
+                // Auto cleanup after 1 hour
+                setTimeout(() => pdfStorage.delete(pdfId), 3600000);
+                
                 resolve({
                     filename,
-                    path: filepath,
-                    invoiceNumber: invoice.invoiceNumber
+                    buffer: pdfBuffer,
+                    storageId: pdfId
                 });
             });
             
-            stream.on('error', reject);
+            doc.on('error', reject);
             
         } catch (error) {
             reject(error);
@@ -246,15 +244,15 @@ const generateInvoicePDF = async (invoice, shipment) => {
     });
 };
 
-// Main function - Generate Invoice from Shipment
+// ========== MAIN FUNCTION ==========
 const generateInvoiceFromShipment = async (shipment) => {
     try {
-        // Calculate amounts
+        console.log(`📄 Generating invoice for: ${shipment.shipmentNumber}`);
+        
         const quotedAmount = shipment.quotedPrice?.amount || 0;
         const tax = quotedAmount * 0.10;
         const totalAmount = quotedAmount + tax;
 
-        // Prepare invoice items
         const items = [{
             description: `${shipment.shipmentClassification?.mainType || 'Freight'} service - ${shipment.shipmentDetails?.origin || 'Origin'} to ${shipment.shipmentDetails?.destination || 'Destination'}`,
             quantity: 1,
@@ -263,10 +261,8 @@ const generateInvoiceFromShipment = async (shipment) => {
             totalPrice: quotedAmount
         }];
 
-        // Generate invoice number
         const invoiceNumber = await generateInvoiceNumber();
 
-        // Save to database
         const invoice = await Invoice.create({
             invoiceNumber,
             shipmentId: shipment._id,
@@ -297,28 +293,37 @@ const generateInvoiceFromShipment = async (shipment) => {
             generatedAt: new Date()
         });
 
-        console.log(`📄 Invoice record created: ${invoiceNumber}`);
+        console.log(`✅ Invoice created: ${invoiceNumber}`);
         
-        // Generate PDF
         const pdfInfo = await generateInvoicePDF(invoice, shipment);
         
-        // Update invoice with PDF path
         await Invoice.findByIdAndUpdate(invoice._id, {
-            pdfPath: pdfInfo.path,
-            pdfFilename: pdfInfo.filename
+            pdfFilename: pdfInfo.filename,
+            pdfStorageId: pdfInfo.storageId  // Store ID for retrieval
         });
         
-        console.log(`📄 PDF generated: ${pdfInfo.filename}`);
+        console.log(`✅ PDF generated: ${pdfInfo.filename}`);
         
-        return invoice;
+        return {
+            invoice,
+            pdfBuffer: pdfInfo.buffer,
+            pdfFilename: pdfInfo.filename,
+            storageId: pdfInfo.storageId
+        };
         
     } catch (error) {
-        console.error('❌ Invoice generation error:', error);
+        console.error('❌ Error:', error);
         return null;
     }
 };
 
+// ========== GET PDF BUFFER ==========
+const getPdfBuffer = (storageId) => {
+    return pdfStorage.get(storageId);
+};
+
 module.exports = { 
     generateInvoiceFromShipment, 
-    generateInvoiceNumber 
+    generateInvoiceNumber,
+    getPdfBuffer
 };
