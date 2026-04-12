@@ -2,6 +2,7 @@ const NewShipment = require('../models/newShipmentModel');
 const { sendEmail, getSenderEmailTemplate, getReceiverEmailTemplate, getAdminEmailTemplate } = require('../service/manualShipmentMail');
 const { generateInvoicePDF, saveInvoiceRecord } = require('../service/manualShipmentInvoice');
 const { generateInvoiceFromShipment } = require('../utils/manualInvoiceGenerator');
+const Booking = require('../models/bookingModel');
 // ================== HELPER FUNCTIONS ==================
 
 // Generate shipment number
@@ -421,7 +422,112 @@ exports.getAllNewShipments = async (req, res) => {
   }
 }; 
  
+exports.updateShipmentTrackingNumber = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { trackingNumber } = req.body;
 
+        if (!trackingNumber) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tracking number is required'
+            });
+        }
+
+        console.log('📦 Updating tracking number for shipment:', id);
+        console.log('🔢 New tracking number:', trackingNumber);
+
+        // 1️⃣ Shipment আপডেট করুন
+        const shipment = await NewShipment.findByIdAndUpdate(
+            id,
+            { 
+                trackingNumber: trackingNumber,
+                updatedBy: req.user?._id 
+            },
+            { new: true }
+        );
+
+        if (!shipment) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Shipment not found' 
+            });
+        }
+
+        console.log('✅ Shipment updated:', shipment.shipmentNumber);
+
+        // 2️⃣ 🔴 Booking-ও আপডেট করুন (এটাই missing ছিল)
+        let bookingUpdated = false;
+        
+        // উপায় 1: shipment.bookingId দিয়ে
+        if (shipment.bookingId) {
+            const booking = await Booking.findByIdAndUpdate(
+                shipment.bookingId,
+                { 
+                    trackingNumber: trackingNumber,
+                    'shipmentDetails.trackingNumber': trackingNumber 
+                },
+                { new: true }
+            );
+            if (booking) {
+                bookingUpdated = true;
+                console.log('✅ Booking updated via bookingId:', booking.bookingNumber);
+            }
+        }
+        
+        // উপায় 2: bookingNumber দিয়ে (যদি উপায় 1 কাজ না করে)
+        if (!bookingUpdated && shipment.bookingNumber) {
+            const booking = await Booking.findOneAndUpdate(
+                { bookingNumber: shipment.bookingNumber },
+                { 
+                    trackingNumber: trackingNumber,
+                    'shipmentDetails.trackingNumber': trackingNumber 
+                },
+                { new: true }
+            );
+            if (booking) {
+                bookingUpdated = true;
+                console.log('✅ Booking updated via bookingNumber:', booking.bookingNumber);
+            }
+        }
+        
+        // উপায় 3: shipmentNumber দিয়ে (যদি উপায় 1-2 কাজ না করে)
+        if (!bookingUpdated && shipment.shipmentNumber) {
+            const booking = await Booking.findOneAndUpdate(
+                { 'shipmentDetails.shipmentNumber': shipment.shipmentNumber },
+                { 
+                    trackingNumber: trackingNumber,
+                    'shipmentDetails.trackingNumber': trackingNumber 
+                },
+                { new: true }
+            );
+            if (booking) {
+                bookingUpdated = true;
+                console.log('✅ Booking updated via shipmentNumber:', booking.bookingNumber);
+            }
+        }
+
+        if (!bookingUpdated) {
+            console.log('⚠️ Warning: No booking found to update tracking number');
+        }
+
+        res.status(200).json({
+            success: true,
+            message: '✅ Tracking number updated successfully in both Shipment and Booking',
+            data: {
+                shipment: shipment,
+                bookingUpdated: bookingUpdated
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Update tracking error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+};
 // controllers/newShipmentController.js - getMyShipments ফাংশন
 
 exports.getMyShipments = async (req, res) => {

@@ -99,7 +99,7 @@ exports.getInvoiceById = async (req, res) => {
 };
 
 // ==================== DELETE INVOICE ====================
-exports.deleteInvoice = async (req, res) => {
+exports.ManualdeleteInvoice = async (req, res) => {
     try {
         const { id } = req.params;
         
@@ -135,6 +135,69 @@ exports.deleteInvoice = async (req, res) => {
         res.status(500).json({
             success: false,
             message: error.message || 'Failed to delete invoice'
+        });
+    }
+}; 
+
+// ==================== GET MY MANUAL INVOICES (FOR CUSTOMER) ====================
+exports.getMyManualInvoices = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const userEmail = req.user?.email;
+        const userId = req.user?._id || req.user?.id;
+        
+        console.log('🔍 Fetching manual invoices for customer:', { userId, userEmail });
+        
+        // Build filter for customer
+        let filter = {
+            $or: [
+                { 'customerInfo.email': userEmail },
+                { createdBy: userId }
+            ]
+        };
+        
+        // Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const limitNum = parseInt(limit);
+        
+        // Get invoices
+        const invoices = await ManualInvoice.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limitNum);
+        
+        // Get total count
+        const total = await ManualInvoice.countDocuments(filter);
+        
+        // Calculate summary
+        const summary = {
+            total: total,
+            paid: await ManualInvoice.countDocuments({ ...filter, status: 'paid' }),
+            pending: await ManualInvoice.countDocuments({ ...filter, status: { $in: ['generated', 'sent'] } }),
+            totalAmount: await ManualInvoice.aggregate([
+                { $match: filter },
+                { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+            ]).then(result => result[0]?.total || 0)
+        };
+        
+        res.status(200).json({
+            success: true,
+            data: invoices,
+            summary: summary,
+            pagination: {
+                total,
+                page: parseInt(page),
+                limit: limitNum,
+                pages: Math.ceil(total / limitNum)
+            },
+            message: 'Your manual invoices fetched successfully'
+        });
+        
+    } catch (error) {
+        console.error('Get my manual invoices error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to fetch your invoices'
         });
     }
 };

@@ -1,12 +1,24 @@
 const mongoose = require('mongoose');
 
 const manualInvoiceSchema = new mongoose.Schema({
+    // ✅ এই লাইনটি যোগ করুন (পুরনো manualInvoiceNumber এর জন্য)
+    manualInvoiceNumber: {
+        type: String,
+        unique: true,
+        sparse: true,  // null ভ্যালু উপেক্ষা করবে
+        default: null
+    },
+    
+    // পুরনো invoiceNumber রাখুন (ব্যাকওয়ার্ড কম্প্যাটিবিলিটির জন্য)
     invoiceNumber: {
         type: String,
-        required: true,
-        unique: true
+        unique: true,
+        sparse: true
     },
-
+ invoiceDate: {
+        type: Date,
+        default: Date.now  // জেনারেট হওয়ার সময় অটোমেটিক সেট হবে
+    },
     shipmentId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'NewShipment'
@@ -39,7 +51,6 @@ const manualInvoiceSchema = new mongoose.Schema({
         totalPrice: Number
     }],
 
-    // ❌ required removed
     subtotal: {
         type: Number,
         default: 0
@@ -60,7 +71,6 @@ const manualInvoiceSchema = new mongoose.Schema({
         default: 'USD'
     },
 
-    // ❌ enum restriction removed
     status: {
         type: String,
         default: 'generated'
@@ -68,7 +78,6 @@ const manualInvoiceSchema = new mongoose.Schema({
 
     pdfPath: String,
 
-    // ❌ required removed
     dueDate: {
         type: Date,
         default: null
@@ -88,7 +97,6 @@ const manualInvoiceSchema = new mongoose.Schema({
     sentAt: Date,
     paidAt: Date,
 
-    // ❌ required removed
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -99,7 +107,10 @@ const manualInvoiceSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// ✅ Overwrite safe
+// ✅ সঠিক ইনডেক্স তৈরি করুন (sparse true সহ)
+manualInvoiceSchema.index({ manualInvoiceNumber: 1 }, { unique: true, sparse: true });
+manualInvoiceSchema.index({ invoiceNumber: 1 }, { unique: true, sparse: true });
+
 const manualInvoice = mongoose.models.manualInvoice || mongoose.model('manualInvoice', manualInvoiceSchema);
 
 module.exports = manualInvoice;

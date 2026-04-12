@@ -197,12 +197,12 @@ router.post(
 
 // Get all invoices (admin only)
 router.get('/getAllmanualInvoices', protect,adminOnly, ManualInvoiceController.getManualInvoices);
-
+router.get('/my-manual-invoices', protect, ManualInvoiceController.getMyManualInvoices);
 // Get single invoice by ID
 router.get('/manualInvoices/:id', protect, adminOnly, ManualInvoiceController.getInvoiceById);
 
 // Delete invoice
-router.delete('/deletemanualInvoice/:id', protect, adminOnly, ManualInvoiceController.deleteInvoice);
+router.delete('/deletemanualInvoice/:id', protect, adminOnly, ManualInvoiceController.ManualdeleteInvoice);
 // shipment
 // ==================== PUBLIC ROUTES ====================  
 // ========== PUBLIC TRACKING (No Auth Required) ==========
@@ -229,6 +229,7 @@ router.get('/my-shipments/:id/timeline',protect,  shipmentController.getMyShipme
 // routes/shipmentRoutes.js
 
 router.put('/update-shipment-tracking/:id', protect, shipmentController.updateShipmentTrackingNumber);
+router.put('/new-update-shipment-tracking/:id', protect, newShipmentController.updateShipmentTrackingNumber);
 // ========== COMMON ROUTES (Accessible by multiple roles) ==========
 router.get('/stats/dashboard', protect, shipmentController.getShipmentStatistics); 
 router.get('/my-shipment-by-id/:id',protect,  shipmentController.getShipmentById); 
