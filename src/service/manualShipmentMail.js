@@ -1,19 +1,42 @@
+// utils/emailService.js
 const nodemailer = require('nodemailer');
+const path = require('path');
 
-// Configure email transporter
+// Create transporter for Hostinger
 const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: process.env.SMTP_HOST || 587,
-    secure: false,
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT),
+    secure: process.env.SMTP_SECURE === 'true',
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
-    }
+    },
+    tls: {
+        rejectUnauthorized: false,
+        ciphers: 'SSLv3'
+    },
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100
 });
 
+// Verify connection configuration
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ SMTP Connection Error:', {
+            message: error.message,
+            code: error.code,
+            command: error.command
+        });
+    } else {
+        console.log('✅ SMTP Server is ready to send emails');
+        console.log(`📧 From: ${process.env.EMAIL_FROM}`);
+        console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL}`);
+    }
+});
 // Email templates
 const getSenderEmailTemplate = (shipment) => {
-    const trackingLink = `${process.env.FRONTEND_URL}/tracking/${shipment.trackingNumber}`;
+    const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/tracking/${shipment.trackingNumber}`;
     
     return `
         <!DOCTYPE html>
@@ -25,7 +48,7 @@ const getSenderEmailTemplate = (shipment) => {
                 .header { background: #1a56db; color: white; padding: 20px; text-align: center; }
                 .content { padding: 20px; background: #f9fafb; }
                 .details { background: white; padding: 15px; margin: 15px 0; border-radius: 5px; }
-                .tracking-btn { display: inline-block; background: white; color: black; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+                .tracking-btn { display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
                 .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
             </style>
         </head>
@@ -118,6 +141,8 @@ const getReceiverEmailTemplate = (shipment) => {
 };
 
 const getAdminEmailTemplate = (shipment) => {
+    const adminUrl = process.env.ADMIN_URL || 'http://localhost:3000/admin';
+    
     return `
         <!DOCTYPE html>
         <html>
@@ -173,7 +198,7 @@ const getAdminEmailTemplate = (shipment) => {
                     </div>
                     
                     <center>
-                        <a href="${process.env.ADMIN_URL}/shipments/${shipment._id}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">
+                        <a href="${adminUrl}/shipments/${shipment._id}" style="display: inline-block; background: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px;">
                             View in Admin Panel
                         </a>
                     </center>
@@ -190,19 +215,25 @@ const getAdminEmailTemplate = (shipment) => {
 // Send email function
 const sendEmail = async (to, subject, html, attachments = []) => {
     try {
+        if (!to) {
+            console.error('❌ No recipient email address provided');
+            return false;
+        }
+
         const mailOptions = {
-            from: `"Cargo Logistics" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
-            to,
+            from: `"Cargo Logistics" <${process.env.EMAIL_FROM || process.env.SMTP_USER}>`,
+            to: to.trim(),
             subject,
             html,
             attachments
         };
         
+        console.log(`📧 Sending email to: ${to}`);
         const info = await transporter.sendMail(mailOptions);
-        console.log(`Email sent to ${to}:`, info.messageId);
+        console.log(`✅ Email sent to ${to}:`, info.messageId);
         return true;
     } catch (error) {
-        console.error(`Failed to send email to ${to}:`, error);
+        console.error(`❌ Failed to send email to ${to}:`, error.message);
         return false;
     }
 };

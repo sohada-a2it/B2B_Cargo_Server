@@ -317,7 +317,7 @@ async function sendEmailsInBackground(shipment) {
         }
 
         // 3. Admin কে ইমেইল
-        const adminEmails = (process.env.ADMIN_EMAILS || 'admin@cargologistics.com').split(',');
+        const adminEmails = (process.env.SMTP_USER || 'admin@cargologistics.com').split(',');
         for (const adminEmail of adminEmails) {
             if (adminEmail.trim()) {
                 await sendEmail(
